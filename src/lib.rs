@@ -7,8 +7,10 @@
 //! app keeps its own model, validation, and cascade resolution and calls these primitives, so
 //! there's no leaf abstraction to fight.
 pub mod colour;
+pub mod edit;
 pub mod fmt;
 mod io;
 
 pub use colour::{Colour, ColourError};
+pub use edit::{add_tab, EditError};
 pub use fmt::{format_file, format_str};

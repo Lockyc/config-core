@@ -13,3 +13,6 @@ thiserror = "1"
 taplo = "0.13"
 # Atomic in-place rewrite for format_file (temp file in the same dir + rename).
 tempfile = "3"
+# Structural, comment-preserving TOML editing for edit::add_tab (append a tab table without
+# reformatting the rest of the file).
+toml_edit = "0.22"
