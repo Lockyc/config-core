@@ -16,6 +16,8 @@ pub enum EditError {
     WindowNotFound(String),
     #[error("window has no group named {0:?}")]
     GroupNotFound(String),
+    #[error("config has a `tab` entry that is not an array of tables")]
+    MalformedTab,
 }
 
 /// Append a `[[window.tab]]` (group `None`) or `[[window.group.tab]]` (group `Some(name)`) table
@@ -50,7 +52,7 @@ pub fn add_tab(
             .entry("tab")
             .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
             .as_array_of_tables_mut()
-            .expect("`tab` is an array of tables"),
+            .ok_or(EditError::MalformedTab)?,
         Some(g) => {
             let groups = win
                 .get_mut("group")
@@ -63,7 +65,7 @@ pub fn add_tab(
             grp.entry("tab")
                 .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
                 .as_array_of_tables_mut()
-                .expect("`tab` is an array of tables")
+                .ok_or(EditError::MalformedTab)?
         }
     };
     tabs.push(tab);
@@ -107,5 +109,93 @@ mod tests {
             tabs.get(0).unwrap()["url"].as_str(),
             Some("https://mail.google.com/")
         );
+    }
+
+    #[test]
+    fn appends_tab_into_named_group() {
+        let (_d, p) = write_tmp(
+            "[[window]]\ntitle = \"Comms\"\n[[window.group]]\nname = \"Chat\"\n[[window.group.tab]]\ntitle = \"A\"\nurl = \"https://a.test/\"\n",
+        );
+        add_tab(
+            &p,
+            "Comms",
+            Some("Chat"),
+            &[("title", "B".into()), ("url", "https://b.test/".into())],
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        let cfg: DocumentMut = out.parse().unwrap();
+        let tabs = cfg["window"][0]["group"][0]["tab"]
+            .as_array_of_tables()
+            .unwrap();
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(tabs.get(1).unwrap()["title"].as_str(), Some("B"));
+    }
+
+    #[test]
+    fn unknown_window_errors() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"Comms\"\n");
+        let err = add_tab(
+            &p,
+            "Nope",
+            None,
+            &[("title", "X".into()), ("url", "https://x.test/".into())],
+        )
+        .unwrap_err();
+        assert!(matches!(err, EditError::WindowNotFound(_)));
+    }
+
+    #[test]
+    fn unknown_group_errors() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"Comms\"\n");
+        let err = add_tab(
+            &p,
+            "Comms",
+            Some("Ghost"),
+            &[("title", "X".into()), ("url", "https://x.test/".into())],
+        )
+        .unwrap_err();
+        assert!(matches!(err, EditError::GroupNotFound(_)));
+    }
+
+    #[test]
+    fn preserves_surrounding_comments_and_field_order() {
+        let (_d, p) = write_tmp(
+            "# top comment\n[[window]]\ntitle = \"Comms\" # inline\n[[window.tab]]\ntitle = \"Existing\"\nurl = \"https://e.test/\"\n",
+        );
+        add_tab(
+            &p,
+            "Comms",
+            None,
+            &[
+                ("title", "New".into()),
+                ("url", "https://n.test/".into()),
+                ("load_on_open", true.into()),
+            ],
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        // Untouched content survives verbatim.
+        assert!(out.contains("# top comment"));
+        assert!(out.contains("title = \"Comms\" # inline"));
+        assert!(out.contains("title = \"Existing\""));
+        // New table present with fields in the given order (title before url before load_on_open).
+        let ti = out.find("title = \"New\"").unwrap();
+        let ui = out.find("url = \"https://n.test/\"").unwrap();
+        let li = out.find("load_on_open = true").unwrap();
+        assert!(ti < ui && ui < li);
+    }
+
+    #[test]
+    fn non_array_tab_key_errors() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"W\"\ntab = \"oops\"\n");
+        let err = add_tab(
+            &p,
+            "W",
+            None,
+            &[("title", "X".into()), ("url", "https://x.test/".into())],
+        )
+        .unwrap_err();
+        assert!(matches!(err, EditError::MalformedTab));
     }
 }
