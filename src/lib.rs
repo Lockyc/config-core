@@ -23,3 +23,8 @@ mod io;
 pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
 pub use fmt::{format_file, format_str};
+
+// Re-exported so consumers can name the field-value type `add_tab` takes
+// (`config_core::toml_edit::Value`) without declaring their own `toml_edit` dependency — which
+// would risk a version skew against the one this crate's API is built on.
+pub use toml_edit;

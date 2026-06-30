@@ -23,7 +23,9 @@ Three modules, all leaf-agnostic:
   field list, so it works for curator's (`url`/`session`) and warden's (`dir`/`shell`/`probe`)
   leaves alike. New-group creation is intentionally *not* built — an unknown `group` errors
   (`EditError::GroupNotFound`); the `Option<&str>` parameter is the seam for adding it later.
-  A pre-existing non-array `tab` key errors as `EditError::MalformedTab`.
+  A pre-existing non-array `tab` key errors as `EditError::MalformedTab`. `toml_edit` is
+  re-exported (`config_core::toml_edit`) so a consumer can name the field-value type without
+  pinning its own `toml_edit` dependency (which would risk a version skew against this crate's API).
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
 leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`) and
