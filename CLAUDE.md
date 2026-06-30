@@ -8,7 +8,7 @@ knowledge of either app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Two modules, both leaf-agnostic:
+Three modules, all leaf-agnostic:
 
 - `fmt` — `format_str(&str) -> String` (pure) and `format_file(&Path) -> io::Result<bool>` (atomic,
   diff-guarded, symlink/mode-preserving). Wraps `taplo` with a fixed house style; `separate_sections`
@@ -17,6 +17,13 @@ Two modules, both leaf-agnostic:
   `Ok(false)` when nothing changed — that no-op-on-clean property is what makes it safe to drive
   from a file watcher (format-on-save) without looping.
 - `colour` — `Colour::parse` / `Colour::hex` for `#rgb`/`#rrggbb` accent colours.
+- `edit` — `add_tab(path, window_title, group, &[(&str, toml_edit::Value)])` appends a
+  `[[window.tab]]`/`[[window.group.tab]]` table (atomic, comment/format-preserving via
+  `toml_edit`; reuses the shared `atomic_write`). **Leaf-agnostic:** the caller passes an ordered
+  field list, so it works for curator's (`url`/`session`) and warden's (`dir`/`shell`/`probe`)
+  leaves alike. New-group creation is intentionally *not* built — an unknown `group` errors
+  (`EditError::GroupNotFound`); the `Option<&str>` parameter is the seam for adding it later.
+  A pre-existing non-array `tab` key errors as `EditError::MalformedTab`.
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
 leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`) and

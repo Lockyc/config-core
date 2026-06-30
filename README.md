@@ -16,6 +16,11 @@ zero knowledge of the leaf are shared:
   only when bytes change (watcher-loop safe), preserving symlinks and file mode.
 - **`colour`** — `#rgb` / `#rrggbb` hex parsing for the per-window accent colour (`Colour::parse`,
   `Colour::hex`).
+- **`edit`** — leaf-agnostic structural insertion. `add_tab(path, window_title, group, fields)`
+  appends a `[[window.tab]]` or `[[window.group.tab]]` table, atomic and comment-preserving via
+  `toml_edit`. The caller supplies an ordered field list; this module knows nothing about what the
+  fields mean, so it works for curator's (`url`/`session`) leaves and warden's
+  (`dir`/`shell`/`probe`) leaves alike. An unknown group errors rather than silently creating one.
 
 ## Use
 
