@@ -2,7 +2,6 @@
 //! tidy. `format_str` is pure; `format_file` applies it to a file atomically and only when the
 //! bytes change (so a watcher driving it can't loop).
 
-use std::io::Write;
 use std::path::Path;
 use taplo::formatter::{format, Options};
 
@@ -122,18 +121,7 @@ pub fn format_file(path: &Path) -> std::io::Result<bool> {
     if formatted == original {
         return Ok(false);
     }
-    // Resolve symlinks → rewrite the real file, preserving the link.
-    let target = std::fs::canonicalize(path)?;
-    let dir = target.parent().unwrap_or_else(|| Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    tmp.write_all(formatted.as_bytes())?;
-    tmp.flush()?;
-    // Carry the original's mode onto the temp, else persist would leave the
-    // tempfile's owner-only 0600 default.
-    if let Ok(meta) = std::fs::metadata(&target) {
-        let _ = tmp.as_file().set_permissions(meta.permissions());
-    }
-    tmp.persist(&target).map_err(|e| e.error)?;
+    crate::io::atomic_write(path, &formatted)?;
     Ok(true)
 }
 

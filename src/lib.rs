@@ -8,6 +8,7 @@
 //! there's no leaf abstraction to fight.
 pub mod colour;
 pub mod fmt;
+mod io;
 
 pub use colour::{Colour, ColourError};
 pub use fmt::{format_file, format_str};
