@@ -40,6 +40,12 @@ Both apps build from source on a fresh clone, so there's no crates.io publish �
 so the apps' install-from-source flows keep working untouched. A breaking change here needs both
 apps re-pointed/re-tested.
 
+## Branching
+
+**Main-only.** There's no release cadence — the apps pin a git rev — so a `dev` trunk buys
+nothing. Commit straight to `main` (code and docs alike) and push. Integration is by direct
+commit/merge on `main`; **don't open pull requests.**
+
 ## Test/build
 
 `cargo test` (unit + golden formatter tests), `cargo fmt`, `cargo clippy` — all green before a
