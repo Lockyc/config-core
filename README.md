@@ -1,5 +1,8 @@
 # config-core
 
+![Built with Rust](https://img.shields.io/badge/built%20with-Rust-CE412B?logo=rust&logoColor=white)
+[![License](https://img.shields.io/github/license/Lockyc/config-core)](LICENSE)
+
 Shared TOML config primitives for the [curator](https://github.com/Lockyc/curator) and
 [warden](https://github.com/Lockyc/warden) apps — the two sibling macOS consoles share the same
 `window → group → tab` config *shape* and the same house style, so the domain-free pieces live
@@ -39,3 +42,7 @@ cargo test    # unit + golden formatter tests
 cargo fmt
 cargo clippy
 ```
+
+## License
+
+[MIT](LICENSE) © Lachlan Collins
