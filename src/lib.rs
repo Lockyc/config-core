@@ -10,7 +10,8 @@
 //! # Modules
 //!
 //! - [`fmt`] — house-style TOML formatter (`format_str`, `format_file`). Atomic, diff-guarded,
-//!   watcher-loop safe.
+//!   watcher-loop safe. [`fmt_cli`] is the shared `fmt` CLI subcommand both apps delegate to (the
+//!   `validate` subcommand stays per-app — it prints each app's own leaf schema).
 //! - [`colour`] — `#rgb`/`#rrggbb` hex accent-colour parsing ([`Colour`], [`ColourError`]).
 //! - [`edit`] — leaf-agnostic structural insertion. [`add_tab`] appends a `[[window.tab]]` or
 //!   `[[window.group.tab]]` table from an ordered field list, atomic and comment-preserving via
@@ -22,7 +23,7 @@ mod io;
 
 pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
-pub use fmt::{format_file, format_str};
+pub use fmt::{fmt_cli, format_file, format_str};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes
 // (`config_core::toml_edit::Value`) without declaring their own `toml_edit` dependency — which

@@ -125,9 +125,72 @@ pub fn format_file(path: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// The shared `fmt` CLI subcommand: format `path` in the house style, or — with `check` — report
+/// whether it *would* change without writing. Returns a process exit code (0 ok / 1 on a read,
+/// TOML-syntax, or write error). App-agnostic: the caller resolves its own default config path and
+/// passes it in, so warden's and curator's `fmt` subcommands share one implementation + identical
+/// messages. `validate` stays per-app (it prints each app's own leaf schema); `fmt` is schema-free.
+pub fn fmt_cli(check: bool, path: &Path) -> i32 {
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {} cannot be read: {e}", path.display());
+            return 1;
+        }
+    };
+    // Refuse to "format" a non-TOML file: taplo error-recovers and would return it unchanged,
+    // falsely reporting success. Check *syntax* only (schema-agnostic, via toml_edit) — `fmt`
+    // tidies any well-formed TOML, so a file merely missing an app-specific field must still format.
+    if let Err(e) = src.parse::<toml_edit::DocumentMut>() {
+        eprintln!("error: {} is not valid TOML: {e}", path.display());
+        return 1;
+    }
+    if check {
+        if format_str(&src) != src {
+            eprintln!("would reformat: {}", path.display());
+            return 1;
+        }
+        println!("ok: {} already formatted", path.display());
+        return 0;
+    }
+    match format_file(path) {
+        Ok(true) => {
+            println!("formatted: {}", path.display());
+            0
+        }
+        Ok(false) => {
+            println!("ok: {} already formatted", path.display());
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {} cannot be formatted: {e}", path.display());
+            1
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fmt_cli_formats_checks_and_rejects_non_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.toml");
+        // Unformatted but valid: --check reports it would change (1); a real run formats it (0);
+        // re-running is idempotent (already formatted, 0).
+        std::fs::write(&path, "a=1\n").unwrap();
+        assert_eq!(fmt_cli(true, &path), 1);
+        assert_eq!(fmt_cli(false, &path), 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a = 1\n");
+        assert_eq!(fmt_cli(true, &path), 0);
+        // Malformed TOML: error exit, file left untouched (taplo would silently pass it through).
+        std::fs::write(&path, "a = = 1\n").unwrap();
+        assert_eq!(fmt_cli(false, &path), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a = = 1\n");
+        // Missing file: error exit.
+        assert_eq!(fmt_cli(false, &dir.path().join("nope.toml")), 1);
+    }
 
     #[test]
     fn indents_nested_tables_and_aligns() {
