@@ -16,7 +16,9 @@ zero knowledge of the leaf are shared:
 - **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
   fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
   blank-line-separated containers with tight nested tabs. `format_file` rewrites atomically and
-  only when bytes change (watcher-loop safe), preserving symlinks and file mode.
+  only when bytes change (watcher-loop safe), preserving symlinks and file mode. `fmt_cli` is the
+  shared `fmt` CLI subcommand both apps delegate to, so `warden fmt` and `curator fmt` are one
+  implementation (the `validate` subcommand stays per-app — it prints each app's own schema).
 - **`colour`** — `#rgb` / `#rrggbb` hex parsing for the per-window accent colour (`Colour::parse`,
   `Colour::hex`).
 - **`edit`** — leaf-agnostic structural insertion. `add_tab(path, window_title, group, fields)`

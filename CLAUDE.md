@@ -15,7 +15,10 @@ Three modules, all leaf-agnostic:
   post-processes blank lines (containers separated, `[[…tab]]` leaves tight). The golden tests pin
   real-config output so a `taplo` bump can't silently change formatting. `format_file` returns
   `Ok(false)` when nothing changed — that no-op-on-clean property is what makes it safe to drive
-  from a file watcher (format-on-save) without looping.
+  from a file watcher (format-on-save) without looping. `fmt_cli(check, &path) -> i32` is the shared
+  `fmt` **CLI subcommand** both apps delegate to (read → reject non-TOML → format/`--check`, with
+  identical messages + exit codes); the caller passes its own resolved default config path. `validate`
+  is *not* here — it prints each app's own leaf schema, which this crate deliberately doesn't know.
 - `colour` — `Colour::parse` / `Colour::hex` for `#rgb`/`#rrggbb` accent colours.
 - `edit` — `add_tab(path, window_title, group, &[(&str, toml_edit::Value)])` appends a
   `[[window.tab]]`/`[[window.group.tab]]` table (atomic, comment/format-preserving via
