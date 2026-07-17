@@ -3,7 +3,7 @@ name = "config-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Shared TOML config primitives (house-style formatter + hex colour parsing) for the curator, warden, and lector apps."
+description = "Shared TOML config primitives for the curator, warden, and lector apps — house-style formatter, hex colour parsing, leaf-agnostic structural editing, config-path resolution, and starter-config seeding."
 repository = "https://github.com/Lockyc/config-core"
 
 [dependencies]

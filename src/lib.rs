@@ -4,9 +4,9 @@
 //! file tidy, but their leaf tab fields diverge (curator: `url`/`session`; warden:
 //! `dir`/`shell`/`probe`; lector: `dir`). This crate carries only the parts that need no
 //! knowledge of any app's leaf — the house-style formatter ([`fmt`]), hex colour parsing
-//! ([`colour`]), structural config edits ([`edit`]), and config-path resolution ([`paths`]). Each
-//! app keeps its own model, validation, and cascade resolution and calls these primitives, so
-//! there's no leaf abstraction to fight.
+//! ([`colour`]), structural config edits ([`edit`]), config-path resolution ([`paths`]), and
+//! starter-config seeding ([`seed`]). Each app keeps its own model, validation, and cascade
+//! resolution and calls these primitives, so there's no leaf abstraction to fight.
 //!
 //! # Modules
 //!

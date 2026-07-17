@@ -31,6 +31,10 @@ need zero knowledge of the leaf are shared:
   env var wins when set and non-empty; a set-but-empty var falls through to the default
   (`~/.config/<app_dir>/config.toml`) instead of the confusing "cannot read config" error an empty
   path would otherwise cause.
+- **`seed`** — a starter config, on request only. `write_default_config(path, template)` writes
+  `template` to `path` atomically if nothing is there yet, and never clobbers an existing file. It
+  never fires automatically (no launch hook, no first-run marker) — an app calls it only when the
+  user asks for one. The mechanism is shared; the template is the caller's own leaf schema.
 
 ## Use
 
