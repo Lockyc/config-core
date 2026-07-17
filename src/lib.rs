@@ -20,16 +20,21 @@
 //! - [`paths`] — where an app's config file lives. [`resolve_config_path`] checks the app's env
 //!   override (set and non-empty) before falling back to [`default_config_path`]
 //!   (`~/.config/<app_dir>/config.toml`).
+//! - [`seed`] — writes a starter config when an app has none. [`write_default_config`] never
+//!   fires automatically (no launch hook, no first-run marker) and never clobbers an existing
+//!   file — an app calls it only in response to a user action.
 pub mod colour;
 pub mod edit;
 pub mod fmt;
 mod io;
 pub mod paths;
+pub mod seed;
 
 pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use paths::{default_config_path, resolve_config_path};
+pub use seed::{write_default_config, SeedError};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes
 // (`config_core::toml_edit::Value`) without declaring their own `toml_edit` dependency — which
