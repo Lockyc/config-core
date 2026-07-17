@@ -1,10 +1,11 @@
 # config-core — agent notes
 
-A small Rust library crate of **domain-free TOML config primitives** shared by two sibling macOS
-apps, [curator](https://github.com/Lockyc/curator) (webview console) and
-[warden](https://github.com/Lockyc/warden) (terminal console). Both share the same
+A small Rust library crate of **domain-free TOML config primitives** shared by three sibling
+macOS apps: [curator](https://github.com/Lockyc/curator) (webview console),
+[warden](https://github.com/Lockyc/warden) (terminal console), and
+[lector](https://github.com/Lockyc/lector) (local-docs console). All three share the same
 `window → group → tab` config shape and house style; this crate holds the parts that need no
-knowledge of either app's leaf tab fields.
+knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
@@ -24,24 +25,26 @@ Three modules, all leaf-agnostic:
   `[[window.tab]]`/`[[window.group.tab]]` table (atomic, comment/format-preserving via
   `toml_edit`; reuses the shared `atomic_write`). **Leaf-agnostic:** the caller passes an ordered
   field list, so it works for curator's (`url`/`session`) and warden's (`dir`/`shell`/`probe`)
-  leaves alike. New-group creation is intentionally *not* built — an unknown `group` errors
-  (`EditError::GroupNotFound`); the `Option<&str>` parameter is the seam for adding it later.
-  A pre-existing non-array `tab` key errors as `EditError::MalformedTab`. `toml_edit` is
-  re-exported (`config_core::toml_edit`) so a consumer can name the field-value type without
-  pinning its own `toml_edit` dependency (which would risk a version skew against this crate's API).
+  leaves alike (lector doesn't consume this module — it re-exports only `fmt`/`colour`). New-group
+  creation is intentionally *not* built — an unknown `group` errors (`EditError::GroupNotFound`);
+  the `Option<&str>` parameter is the seam for adding it later. A pre-existing non-array `tab` key
+  errors as `EditError::MalformedTab`. `toml_edit` is re-exported (`config_core::toml_edit`) so a
+  consumer can name the field-value type without pinning its own `toml_edit` dependency (which
+  would risk a version skew against this crate's API).
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
-leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`) and
-each app owns its own model, validation, and cascade resolution. Only add a primitive here when it
-is genuinely identical and leaf-free in *both* apps. `fmt`'s "tab" leaf detection keys on the
-literal `tab` table name, which both apps use (`[[window.tab]]`, `[[window.group.tab]]`).
+leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
+lector: `dir`, a local doc-repo path) and each app owns its own model, validation, and cascade
+resolution. Only add a primitive here when it is genuinely identical and leaf-free in *all three*
+apps. `fmt`'s "tab" leaf detection keys on the literal `tab` table name, which all three apps use
+(`[[window.tab]]`, `[[window.group.tab]]`).
 
 ## Consumed as a git dependency
 
-Both apps build from source on a fresh clone, so there's no crates.io publish — they depend via
-`config-core = { git = "https://github.com/Lockyc/config-core" }`. Cargo fetches it at build time,
-so the apps' install-from-source flows keep working untouched. A breaking change here needs both
-apps re-pointed/re-tested.
+All three apps build from source on a fresh clone, so there's no crates.io publish — they depend
+via `config-core = { git = "https://github.com/Lockyc/config-core" }`. Cargo fetches it at build
+time, so the apps' install-from-source flows keep working untouched. A breaking change here needs
+all three apps re-pointed/re-tested.
 
 ## Branching
 
