@@ -9,7 +9,7 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Four modules, all leaf-agnostic:
+Five modules, all leaf-agnostic:
 
 - `fmt` — `format_str(&str) -> String` (pure) and `format_file(&Path) -> io::Result<bool>` (atomic,
   diff-guarded, symlink/mode-preserving). Wraps `taplo` with a fixed house style; `separate_sections`
@@ -40,6 +40,33 @@ Four modules, all leaf-agnostic:
   through to the default rather than yielding `PathBuf::from("")`, whose only symptom is a
   confusing "cannot read config: No such file or directory" — warden had this right; curator and
   lector didn't, until this was shared.
+- `seed` — `write_default_config(path, template) -> Result<bool, SeedError>`: write `template` to
+  `path` if nothing is there yet, atomically, never clobbering an existing file (`Ok(false)` = a
+  file already existed and was left alone). **Never fires automatically** — no launch hook, no
+  first-run marker; an app calls it only when the user clicks a "Create a starter config" button
+  (shell-core's home surface). The mechanism (where, atomically, never-clobber) is shared; the
+  template string is the caller's own leaf schema, passed in.
+
+**`resolve_config_path` and `write_default_config` are path/filesystem primitives, not TOML-content
+primitives like the original three modules — and that's exactly the scope this crate's own bar
+already covers, not an expansion of it.** They qualify on the same test as everything else here:
+identical and leaf-free in all three apps. Every app resolves its config path the same way and
+differs only in an env-var name and a `~/.config` subdirectory (both parameters); every app seeds a
+starter config the same way (atomically, never clobbering) and differs only in the template
+contents (also a parameter). Neither knows a single leaf field.
+
+**Footgun: `atomic_write` and `atomic_create` are not interchangeable — `atomic_write` requires the
+target to already exist.** `io::atomic_write` opens with `std::fs::canonicalize(path)`, which
+**fails** (`ErrorKind::NotFound`) when nothing is at `path` yet — that's deliberate: canonicalizing
+the *target* is what keeps a rewrite landing on a dotfiles-symlinked config in place rather than
+replacing the link with a plain file, and `format_file`/`edit::add_tab` both depend on that
+resolution. Seeding a config where none exists is the opposite case, so `io::atomic_create` is a
+**sibling**, not a relaxed `atomic_write`: it canonicalizes the *parent* directory instead, so a
+`~/.config` symlinked out of a dotfiles repo still receives the real file through the link. A test
+(`atomic_write_still_refuses_a_nonexistent_target`) pins that `atomic_write` keeps refusing a
+missing target — don't "simplify" the two into one function; that would either break the
+symlinked-config rewrite case or make `atomic_write` silently start creating files where an
+existing one was expected.
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
 leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;

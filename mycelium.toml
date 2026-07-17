@@ -8,3 +8,7 @@ stack   = ["rust", "taplo"]
 [[provides]]
 name    = "config-shape"
 summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand all three apps delegate to), #rgb/#rrggbb accent parsing, and comment-preserving structural tab insertion. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
+
+[[provides]]
+name    = "config-path-seed"
+summary = "resolve_config_path()/default_config_path() — the identical $ENV-override-else-~/.config/<app>/config.toml resolution every app uses (fixed a set-but-empty-env bug two of three apps shipped) — and write_default_config(), an atomic, never-clobbering starter-config writer an app calls only on a user click (shell-core's home surface), never automatically."
