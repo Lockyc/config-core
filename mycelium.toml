@@ -1,5 +1,5 @@
 name    = "config-core"
-summary = "Shared TOML config primitives for the warden/curator consoles — house-style formatter, accent colour parsing, leaf-agnostic structural editing"
+summary = "Shared TOML config primitives for the warden/curator/lector consoles — house-style formatter, accent colour parsing, leaf-agnostic structural editing"
 kind    = "library"
 status  = "active"
 tags    = ["config", "toml", "formatter", "shared-core"]
@@ -7,4 +7,4 @@ stack   = ["rust", "taplo"]
 
 [[provides]]
 name    = "config-shape"
-summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand both apps delegate to), #rgb/#rrggbb accent parsing, and comment-preserving structural tab insertion. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
+summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand all three apps delegate to), #rgb/#rrggbb accent parsing, and comment-preserving structural tab insertion. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
