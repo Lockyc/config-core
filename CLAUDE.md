@@ -9,7 +9,7 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Three modules, all leaf-agnostic:
+Four modules, all leaf-agnostic:
 
 - `fmt` — `format_str(&str) -> String` (pure) and `format_file(&Path) -> io::Result<bool>` (atomic,
   diff-guarded, symlink/mode-preserving). Wraps `taplo` with a fixed house style; `separate_sections`
@@ -17,7 +17,7 @@ Three modules, all leaf-agnostic:
   real-config output so a `taplo` bump can't silently change formatting. `format_file` returns
   `Ok(false)` when nothing changed — that no-op-on-clean property is what makes it safe to drive
   from a file watcher (format-on-save) without looping. `fmt_cli(check, &path) -> i32` is the shared
-  `fmt` **CLI subcommand** both apps delegate to (read → reject non-TOML → format/`--check`, with
+  `fmt` **CLI subcommand** all three apps delegate to (read → reject non-TOML → format/`--check`, with
   identical messages + exit codes); the caller passes its own resolved default config path. `validate`
   is *not* here — it prints each app's own leaf schema, which this crate deliberately doesn't know.
 - `colour` — `Colour::parse` / `Colour::hex` for `#rgb`/`#rrggbb` accent colours.
@@ -31,6 +31,15 @@ Three modules, all leaf-agnostic:
   errors as `EditError::MalformedTab`. `toml_edit` is re-exported (`config_core::toml_edit`) so a
   consumer can name the field-value type without pinning its own `toml_edit` dependency (which
   would risk a version skew against this crate's API).
+- `paths` — `resolve_config_path(env_var, app_dir) -> PathBuf` and
+  `default_config_path(app_dir) -> PathBuf`. Every app resolves its config the same way — the
+  named env var if set **and non-empty**, else `~/.config/<app_dir>/config.toml` — and differs only
+  in its env-var name and `~/.config` subdirectory, both passed in by the caller. Deliberately
+  `~/.config`, not `dirs::config_dir()` (macOS: `~/Library/Application Support`), so the config
+  stays in the dotfiles bare-repo workflow the user manages it with. A set-but-empty env var falls
+  through to the default rather than yielding `PathBuf::from("")`, whose only symptom is a
+  confusing "cannot read config: No such file or directory" — warden had this right; curator and
+  lector didn't, until this was shared.
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
 leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
