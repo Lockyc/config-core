@@ -10,7 +10,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The runner's rustup reads rust-toolchain.toml and installs the pinned
       # channel + components. No toolchain action: pinning it to @stable would
