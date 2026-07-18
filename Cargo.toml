@@ -7,15 +7,15 @@ description = "Shared TOML config primitives for the curator, warden, and lector
 repository = "https://github.com/Lockyc/config-core"
 
 [dependencies]
-thiserror = "1"
+thiserror = "2"
 # `~` resolution for the shared config-path helper (paths.rs). Deliberately only home_dir() —
 # NOT dirs::config_dir(), which on macOS is ~/Library/Application Support (see paths.rs).
-dirs = "5"
+dirs = "6"
 # House-style TOML formatter (see fmt.rs), embedded as a library so a consuming app can format
 # its own config — no standalone taplo binary required.
-taplo = "0.13"
+taplo = "0.14"
 # Atomic in-place rewrite for format_file (temp file in the same dir + rename).
 tempfile = "3"
 # Structural, comment-preserving TOML editing for edit::add_tab (append a tab table without
 # reformatting the rest of the file).
-toml_edit = "0.22"
+toml_edit = "0.25"
