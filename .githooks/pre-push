@@ -23,7 +23,7 @@ if ! bin="$(docgraph_bin)"; then
   echo "  install it: go install github.com/lockyc/docgraph/v3@latest" >&2
   exit 1
 fi
-"$bin" --skip disconnected .
+"$bin" .
 # Diff-scoped ADVISORY nag: footgun declarations ADDED in the pushed range. Never blocks.
 printf '%s' "$refs" | "$bin" footgun-drift . || true
 # Diff-scoped ADVISORY nag: docs whose 'covers' edge points at code this push changed. Never blocks.

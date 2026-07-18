@@ -1,5 +1,9 @@
 ---
 type: architecture
+links:
+  - rel: see-also
+    to: README.md
+    note: human-facing counterpart — same crate, README for contributors, this file for agents
 ---
 
 # config-core — agent notes
