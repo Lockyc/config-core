@@ -1,3 +1,7 @@
+---
+type: architecture
+---
+
 # config-core — agent notes
 
 A small Rust library crate of **domain-free TOML config primitives** shared by three sibling
