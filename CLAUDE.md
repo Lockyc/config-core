@@ -17,8 +17,18 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Five modules, all leaf-agnostic:
+Six modules, all leaf-agnostic:
 
+- `roots` — project-tree discovery: `scan_root(dir, max_depth) -> Vec<PathBuf>` (walks a dir tree,
+  stopping at every git root — dir or file, for worktrees — never descending into one, skipping
+  hidden dirs, not following symlinks) and `tree_path(root_dir, project) -> Vec<String>` (the
+  folder segments between them, for chrome-core's folder-tree nesting). `resolve_root_dir(name,
+  dir, depth) -> Result<RootDir, RootError>` validates + tilde-expands a raw root (name defaults to
+  the dir's basename, depth to [`roots::DEFAULT_ROOT_DEPTH`]). `discover_projects(&[RootDir]) ->
+  Vec<DiscoveredProject>` flattens a window's roots in order, sorted within each root, with **no
+  cross-root dedup** — a project reachable via two roots is emitted once per root; the consuming
+  app collapses duplicates by its own tab identity. Consumed by warden and lector, not curator (see
+  the charter note below).
 - `fmt` — `format_str(&str) -> String` (pure) and `format_file(&Path) -> io::Result<bool>` (atomic,
   diff-guarded, symlink/mode-preserving). Wraps `taplo` with a fixed house style; `separate_sections`
   post-processes blank lines (containers separated, `[[…tab]]` leaves tight). The golden tests pin
@@ -79,9 +89,14 @@ existing one was expected.
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
 leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
 lector: `dir`, a local doc-repo path) and each app owns its own model, validation, and cascade
-resolution. Only add a primitive here when it is genuinely identical and leaf-free in *all three*
-apps. `fmt`'s "tab" leaf detection keys on the literal `tab` table name, which all three apps use
-(`[[window.tab]]`, `[[window.group.tab]]`).
+resolution. Only add a primitive here when it is **leaf-free** (no app's tab-leaf type appears in
+its signature) and shared by **two or more** apps. The `roots` module is the precedent:
+`scan_root`/`RootDir`/`discover_projects` are concrete and leaf-free (the app maps
+`DiscoveredProject` onto its own tab type), and are consumed by warden + lector but not curator —
+leaf-freeness, not "all three", is the gate. The still-standing half of the old rule: do **not**
+genericize a window/group/tab model over a leaf **trait** or type parameter; keep shared root code
+concrete. `fmt`'s "tab" leaf detection keys on the literal `tab` table name, which all three apps
+use (`[[window.tab]]`, `[[window.group.tab]]`).
 
 ## Consumed as a git dependency
 
