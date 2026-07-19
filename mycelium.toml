@@ -5,6 +5,9 @@ status  = "active"
 tags    = ["config", "toml", "formatter", "shared-core"]
 stack   = ["rust", "taplo"]
 
+[github]
+topics_extra = ["library"]
+
 [[provides]]
 name    = "config-shape"
 summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand all three apps delegate to), #rgb/#rrggbb accent parsing, and comment-preserving structural tab insertion. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
