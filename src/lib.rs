@@ -1,12 +1,15 @@
 //! Domain-free TOML config primitives shared by the curator, warden, and lector apps.
 //!
 //! All three share the same window → group → tab config *shape* and the same need to keep the
-//! file tidy, but their leaf tab fields diverge (curator: `url`/`session`; warden:
-//! `dir`/`shell`/`probe`; lector: `dir`). This crate carries only the parts that need no
-//! knowledge of any app's leaf — the house-style formatter ([`fmt`]), hex colour parsing
-//! ([`colour`]), structural config edits ([`edit`]), config-path resolution ([`paths`]), and
-//! starter-config seeding ([`seed`]). Each app keeps its own model, validation, and cascade
-//! resolution and calls these primitives, so there's no leaf abstraction to fight.
+//! file tidy, and their divergence is multi-level (each app decorates `Config`, `WindowConfig`,
+//! and the leaf `Tab` — curator's `url`/`session`, warden's `dir`/`shell`/`probe`, lector's
+//! `dir`). This crate carries the parts that need no knowledge of any app's leaf: the leaf-free
+//! model primitives ([`model`] — [`Density`], [`OpenOnLaunch`], [`Warning`], the logic-free
+//! [`Group<T>`] container, and the shared serde field defaults), the house-style formatter
+//! ([`fmt`]), hex colour parsing ([`colour`]), structural config edits ([`edit`]), config-path
+//! resolution ([`paths`]), and starter-config seeding ([`seed`]). Each app keeps its own leaf
+//! type, validation, and cascade resolution and layers them on these, so there's no leaf
+//! abstraction to fight.
 //!
 //! # Modules
 //!
@@ -30,6 +33,7 @@ pub mod colour;
 pub mod edit;
 pub mod fmt;
 mod io;
+pub mod model;
 pub mod paths;
 pub mod roots;
 pub mod seed;
@@ -37,6 +41,10 @@ pub mod seed;
 pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
+pub use model::{
+    default_true, default_window_height, default_window_width, Density, Group, OpenOnLaunch,
+    Warning,
+};
 pub use paths::{default_config_path, resolve_config_path};
 pub use roots::{
     discover_projects, resolve_root_dir, scan_root, tree_path, DiscoveredProject, RootDir,

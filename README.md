@@ -8,11 +8,16 @@ Shared TOML config primitives for the [curator](https://github.com/Lockyc/curato
 the three sibling macOS consoles share the same `window → group → tab` config *shape* and the
 same house style, so the domain-free pieces live here once instead of being copied between them.
 
-It is intentionally **not** a generic config framework. The apps' leaf tab fields genuinely
-diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`), so each app keeps
-its own model, validation, and cascade resolution and calls these primitives. Only the parts that
-need zero knowledge of the leaf are shared:
+It is intentionally **not** a generic config framework. The apps' models diverge at every level —
+the leaf tab fields (curator: `url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`), and
+the `Config`/`WindowConfig` decorations around them — so each app keeps its own leaf type,
+validation, and cascade resolution and calls these primitives. Only the parts that need zero
+knowledge of the leaf are shared:
 
+- **`model`** — the leaf-free config-model primitives: `Density` (whole-app chrome sizing),
+  `OpenOnLaunch` (window launch target), the non-fatal `Warning`, and the logic-free `Group<T>`
+  container — a `name` plus a `Vec<T>` of each app's own leaf tab, holding no leaf meaning itself.
+  Plus the shared serde defaults (`default_true`, `default_window_width`/`_height`).
 - **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
   fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
   blank-line-separated containers with tight nested tabs. `format_file` rewrites atomically and

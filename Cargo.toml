@@ -8,6 +8,11 @@ repository = "https://github.com/Lockyc/config-core"
 
 [dependencies]
 thiserror = "1"
+# Typed config-model primitives (model.rs) derive Serialize/Deserialize so the apps can
+# `toml::from_str` a config whose shared parts (Density, OpenOnLaunch, Group<T>, …) live here.
+# config-core already spans TOML's *document* mode (toml_edit, for fmt/edit); hosting typed
+# primitives completes it into the *loading* mode too — every `*-config` sibling already pulls serde.
+serde = { version = "1", features = ["derive"] }
 # `~` resolution for the shared config-path helper (paths.rs). Deliberately only home_dir() —
 # NOT dirs::config_dir(), which on macOS is ~/Library/Application Support (see paths.rs).
 dirs = "5"
@@ -19,3 +24,8 @@ tempfile = "3"
 # Structural, comment-preserving TOML editing for edit::add_tab (append a tab table without
 # reformatting the rest of the file).
 toml_edit = "0.22"
+
+[dev-dependencies]
+# Only the model.rs unit tests deserialize via the runtime loader; the crate's own API doesn't
+# parse (yet), so toml is a test-only dep.
+toml = "0.8"

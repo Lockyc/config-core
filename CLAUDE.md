@@ -17,8 +17,15 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Six modules, all leaf-agnostic:
+Seven modules, all leaf-agnostic:
 
+- `model` — the leaf-free config-model primitives: `Density` (whole-app chrome sizing; serde
+  round-trips the lowercase token, `as_str()` for apps that build the attribute by hand), `OpenOnLaunch`
+  (window launch-target enum), `Warning` (non-fatal `{window, message}` surfaced on load), the
+  logic-free `Group<T>` container (generic over each app's own leaf `Tab` — carries only a `name` and
+  its tabs, no leaf logic), and the shared serde field defaults (`default_true`,
+  `default_window_width`/`_height`). curator and lector re-export all of these; warden re-exports
+  `Density`/`Warning` (its model is hand-built through `raw → resolve`, but the shapes are identical).
 - `roots` — project-tree discovery: `scan_root(dir, max_depth) -> Vec<PathBuf>` (walks a dir tree,
   stopping at every git root — dir or file, for worktrees — never descending into one, skipping
   hidden dirs, not following symlinks) and `tree_path(root_dir, project) -> Vec<String>` (the
@@ -87,16 +94,23 @@ symlinked-config rewrite case or make `atomic_write` silently start creating fil
 existing one was expected.
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
-leaf trait. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
-lector: `dir`, a local doc-repo path) and each app owns its own model, validation, and cascade
-resolution. Only add a primitive here when it is **leaf-free** (no app's tab-leaf type appears in
-its signature) and shared by **two or more** apps. The `roots` module is the precedent:
-`scan_root`/`RootDir`/`discover_projects` are concrete and leaf-free (the app maps
-`DiscoveredProject` onto its own tab type), and are consumed by warden + lector but not curator —
-leaf-freeness, not "all three", is the gate. The still-standing half of the old rule: do **not**
-genericize a window/group/tab model over a leaf **trait** or type parameter; keep shared root code
-concrete. `fmt`'s "tab" leaf detection keys on the literal `tab` table name, which all three apps
-use (`[[window.tab]]`, `[[window.group.tab]]`).
+leaf **trait**. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
+lector: `dir`, a local doc-repo path) *and their divergence is multi-level* — each app also decorates
+`Config` and `WindowConfig` (curator's `session`/`allow_insecure`, lector's `theme`/`roots`, warden's
+`probe_interval`/`tab_digit_keys`), so each app owns its own model, validation, and cascade
+resolution. Only add a primitive here when it is **leaf-free** (no app's tab-leaf type appears in its
+signature) and shared by **two or more** apps. `roots` is one precedent
+(`scan_root`/`RootDir`/`discover_projects` — consumed by warden + lector but not curator, so
+leaf-freeness, not "all three", is the gate); `model` is the other (`Density`/`Warning` across all
+three, `OpenOnLaunch`/`Group<T>`/`default_*` across curator + lector).
+
+The gate is **leaf-freeness**, and a *logic-free* generic container passes it: `Group<T>` is a `name`
+plus `Vec<T>` — it names each app's leaf generically but touches no leaf meaning, so it belongs here.
+What stays forbidden is genericizing the *model* over a leaf **trait** (a `Tab: TabLike` the
+window/group machinery dispatches through) — that would smuggle leaf logic behind a type param and is
+the abstraction this crate exists to avoid. Rule of thumb: a container that only *holds* leaves is
+fine; a trait the model *calls into* is not. `fmt`'s "tab" leaf detection keys on the literal `tab`
+table name, which all three apps use (`[[window.tab]]`, `[[window.group.tab]]`).
 
 ## Consumed as a git dependency
 
