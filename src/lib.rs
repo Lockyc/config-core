@@ -23,6 +23,9 @@
 //! - [`seed`] — writes a starter config when an app has none. [`write_default_config`] never
 //!   fires automatically (no launch hook, no first-run marker) and never clobbers an existing
 //!   file — an app calls it only in response to a user action.
+//! - [`roots`] — leaf-free project-tree discovery shared by warden + lector: [`scan_root`] walks a
+//!   dir for git repos, [`resolve_root_dir`] validates a `[[window.root]]`'s `{name,dir,depth}`,
+//!   and [`discover_projects`] flattens roots into [`DiscoveredProject`]s the app maps onto its tab.
 pub mod colour;
 pub mod edit;
 pub mod fmt;

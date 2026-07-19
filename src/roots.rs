@@ -206,7 +206,7 @@ mod tests {
         // a nested repo inside a git root must NOT be discovered separately
         git(&base.join("gh/lockyc/warden/vendor/sub"));
         git(&base.join("gh/other/proj"));
-        fs::create_dir_all(&base.join("gh/empty")).unwrap(); // no repo → nothing
+        fs::create_dir_all(base.join("gh/empty")).unwrap(); // no repo → nothing
         let mut got = scan_root(&base, 6);
         got.sort();
         assert_eq!(
