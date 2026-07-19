@@ -151,6 +151,33 @@ pub fn resolve_root_dir(
     Ok(RootDir { name, dir: path, depth })
 }
 
+/// One discovered project handed back to the app: its path, the folder segments between the root
+/// dir and it (for chrome-core's folder-tree nesting), and the section (root) name it belongs to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoveredProject {
+    pub path: PathBuf,
+    pub tree_path: Vec<String>,
+    pub section: String,
+}
+
+/// Flatten a window's roots into discovered projects, roots in order, sorted within each root. No
+/// cross-root dedup: a project reachable via two roots appears once per root, and the consuming
+/// app collapses duplicates by its own tab identity (first occurrence wins).
+pub fn discover_projects(roots: &[RootDir]) -> Vec<DiscoveredProject> {
+    let mut out = Vec::new();
+    for root in roots {
+        for path in scan_root(&root.dir, root.depth) {
+            let tp = tree_path(&root.dir, &path);
+            out.push(DiscoveredProject {
+                path,
+                tree_path: tp,
+                section: root.name.clone(),
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +265,46 @@ mod tests {
             resolve_root_dir(None, "/tmp/x", Some(0)),
             Err(RootError::ZeroDepth(0))
         );
+    }
+
+    #[test]
+    fn discover_maps_each_project_with_treepath_and_section() {
+        let base = tmp("discover");
+        git(&base.join("gh/lockyc/lector"));
+        git(&base.join("solo"));
+        let root = RootDir {
+            name: "Dev".into(),
+            dir: base.clone(),
+            depth: 6,
+        };
+        let got = discover_projects(std::slice::from_ref(&root));
+        // sorted within a root: "gh/..." before "solo"
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].path, base.join("gh/lockyc/lector"));
+        assert_eq!(got[0].tree_path, vec!["gh".to_string(), "lockyc".to_string()]);
+        assert_eq!(got[0].section, "Dev");
+        assert!(got[1].tree_path.is_empty()); // solo sits directly under the root
+        assert_eq!(got[1].section, "Dev");
+    }
+
+    #[test]
+    fn discover_preserves_root_order_and_emits_overlap_twice() {
+        // Cross-root dedup is the APP's job; discover emits a shared project once per root.
+        let base = tmp("discover-order");
+        git(&base.join("proj"));
+        let a = RootDir {
+            name: "A".into(),
+            dir: base.clone(),
+            depth: 6,
+        };
+        let b = RootDir {
+            name: "B".into(),
+            dir: base.clone(),
+            depth: 6,
+        };
+        let got = discover_projects(&[a, b]);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].section, "A");
+        assert_eq!(got[1].section, "B");
     }
 }
