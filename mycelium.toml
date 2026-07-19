@@ -1,5 +1,5 @@
 name    = "config-core"
-summary = "Shared TOML config primitives for the warden/curator/lector consoles — house-style formatter, accent colour parsing, leaf-agnostic structural editing, config-path resolution, and starter-config seeding"
+summary = "The shared config engine behind warden, curator and lector — parses, validates and house-formats each app's TOML config (preserving your comments), resolves its path, reads accent colours, and writes a starter config on first run."
 kind    = "library"
 status  = "active"
 tags    = ["config", "toml", "formatter", "shared-core"]
