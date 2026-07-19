@@ -148,7 +148,11 @@ pub fn resolve_root_dir(
     if depth == 0 {
         return Err(RootError::ZeroDepth(0));
     }
-    Ok(RootDir { name, dir: path, depth })
+    Ok(RootDir {
+        name,
+        dir: path,
+        depth,
+    })
 }
 
 /// One discovered project handed back to the app: its path, the folder segments between the root
@@ -281,7 +285,10 @@ mod tests {
         // sorted within a root: "gh/..." before "solo"
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].path, base.join("gh/lockyc/lector"));
-        assert_eq!(got[0].tree_path, vec!["gh".to_string(), "lockyc".to_string()]);
+        assert_eq!(
+            got[0].tree_path,
+            vec!["gh".to_string(), "lockyc".to_string()]
+        );
         assert_eq!(got[0].section, "Dev");
         assert!(got[1].tree_path.is_empty()); // solo sits directly under the root
         assert_eq!(got[1].section, "Dev");
