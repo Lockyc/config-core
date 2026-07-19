@@ -81,6 +81,76 @@ pub fn tree_path(root_dir: &Path, project: &Path) -> Vec<String> {
     segs
 }
 
+/// Default project-tree scan depth below a root's `dir` when `depth` is omitted — a safety floor
+/// against runaway walks on a deep or huge tree.
+pub const DEFAULT_ROOT_DEPTH: u32 = 6;
+
+/// A validated project-tree root: a scanned dir + its section name + scan depth. Leaf-free — the
+/// app attaches its own per-root fields (warden: shell/cmd/probe/kill; lector: none) separately.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RootDir {
+    pub name: String,
+    pub dir: PathBuf,
+    pub depth: u32,
+}
+
+/// Why a raw root failed shared validation. The app maps these onto its own error type with the
+/// enclosing window's context (config-core has no window concept).
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum RootError {
+    #[error("root has an empty dir")]
+    EmptyDir,
+    #[error("root has an empty name")]
+    EmptyName,
+    #[error("root has invalid depth {0} (must be >= 1)")]
+    ZeroDepth(u32),
+}
+
+fn expand_tilde(s: &str) -> PathBuf {
+    let t = s.trim();
+    if t == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    }
+    if let Some(rest) = t.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(t)
+}
+
+fn basename(dir: &Path) -> String {
+    dir.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| dir.to_string_lossy().into_owned())
+}
+
+/// Validate + resolve a raw root's shared fields. `name` defaults to `basename(dir)`; an explicit
+/// empty name is an error (a typo, not "use the default"). `dir` is tilde-expanded (not
+/// canonicalized — a missing dir must still resolve; the caller warns). `depth` defaults to
+/// [`DEFAULT_ROOT_DEPTH`]; `0` is an error. Stored name is trimmed so a trailing-space typo
+/// collides in the app's section namespace.
+pub fn resolve_root_dir(
+    name: Option<&str>,
+    dir: &str,
+    depth: Option<u32>,
+) -> Result<RootDir, RootError> {
+    if dir.trim().is_empty() {
+        return Err(RootError::EmptyDir);
+    }
+    let path = expand_tilde(dir);
+    let name = match name {
+        Some(n) if n.trim().is_empty() => return Err(RootError::EmptyName),
+        Some(n) => n.trim().to_string(),
+        None => basename(&path),
+    };
+    let depth = depth.unwrap_or(DEFAULT_ROOT_DEPTH);
+    if depth == 0 {
+        return Err(RootError::ZeroDepth(0));
+    }
+    Ok(RootDir { name, dir: path, depth })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +210,33 @@ mod tests {
             vec!["gh".to_string(), "lockyc".to_string()]
         );
         assert!(tree_path(&root, &PathBuf::from("/r/Developer/loose")).is_empty());
+    }
+
+    #[test]
+    fn resolve_defaults_name_to_basename_and_depth_to_default() {
+        let r = resolve_root_dir(None, "~/Developer", None).unwrap();
+        assert_eq!(r.name, "Developer");
+        assert_eq!(r.depth, DEFAULT_ROOT_DEPTH);
+        assert!(r.dir.is_absolute(), "tilde must expand");
+    }
+
+    #[test]
+    fn resolve_trims_explicit_name_and_keeps_depth() {
+        let r = resolve_root_dir(Some("  Dev  "), "/tmp/x", Some(3)).unwrap();
+        assert_eq!(r.name, "Dev");
+        assert_eq!(r.depth, 3);
+    }
+
+    #[test]
+    fn resolve_rejects_empty_dir_name_and_zero_depth() {
+        assert_eq!(resolve_root_dir(None, "  ", None), Err(RootError::EmptyDir));
+        assert_eq!(
+            resolve_root_dir(Some(" "), "/tmp/x", None),
+            Err(RootError::EmptyName)
+        );
+        assert_eq!(
+            resolve_root_dir(None, "/tmp/x", Some(0)),
+            Err(RootError::ZeroDepth(0))
+        );
     }
 }
