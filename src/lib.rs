@@ -28,12 +28,17 @@ pub mod edit;
 pub mod fmt;
 mod io;
 pub mod paths;
+pub mod roots;
 pub mod seed;
 
 pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use paths::{default_config_path, resolve_config_path};
+pub use roots::{
+    discover_projects, resolve_root_dir, scan_root, tree_path, DiscoveredProject, RootDir,
+    RootError, DEFAULT_ROOT_DEPTH,
+};
 pub use seed::{write_default_config, SeedError};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes
