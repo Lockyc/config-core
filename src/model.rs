@@ -1,7 +1,7 @@
 //! Leaf-free config-model primitives shared by the curator, warden, and lector apps.
 //!
 //! These are the parts of the window → group → tab model that carry no knowledge of any app's
-//! leaf tab shape: the whole-app presentation enums ([`Density`], [`OpenOnLaunch`]), the
+//! leaf tab shape: the whole-app presentation enum [`Density`], the
 //! non-fatal [`Warning`], the logic-free [`Group<T>`] container (generic over each app's own
 //! `Tab`), and the shared serde field defaults. Each app re-exports these under its own config
 //! crate so `app_config::Density` etc. keep resolving, and layers its own leaf types on top.
@@ -33,22 +33,6 @@ impl Density {
             Density::Comfortable => "comfortable",
             Density::Compact => "compact",
         }
-    }
-}
-
-/// What to open when a window launches. The default (`false` / unset) opens the first
-/// `load_on_open` (loaded) tab, else the blank background — the first tab isn't always loaded, so
-/// it isn't forced. `true` opens the first tab even if it isn't loaded; a string opens the tab
-/// whose `title` matches (falling back to the first).
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(untagged)]
-pub enum OpenOnLaunch {
-    Toggle(bool),
-    Tab(String),
-}
-impl Default for OpenOnLaunch {
-    fn default() -> Self {
-        OpenOnLaunch::Toggle(false)
     }
 }
 
@@ -116,19 +100,6 @@ mod tests {
     #[derive(Deserialize)]
     struct Wrap {
         d: Density,
-    }
-
-    #[test]
-    fn open_on_launch_toggle_and_tab() {
-        assert_eq!(OpenOnLaunch::default(), OpenOnLaunch::Toggle(false));
-        #[derive(Deserialize)]
-        struct W {
-            o: OpenOnLaunch,
-        }
-        let w: W = toml::from_str("o = true\n").unwrap();
-        assert_eq!(w.o, OpenOnLaunch::Toggle(true));
-        let w: W = toml::from_str("o = \"Mail\"\n").unwrap();
-        assert_eq!(w.o, OpenOnLaunch::Tab("Mail".into()));
     }
 
     #[test]
