@@ -36,6 +36,41 @@ impl Density {
     }
 }
 
+/// Behaviour of the ⌘1/⌘2 menu accelerators — a whole-app keybinding mode, no per-window cascade.
+///
+/// - `Jump` (default, the macOS convention): ⌘1–⌘9 jump straight to the tab at that 1-based
+///   position.
+/// - `Cycle`: ⌘1 = next tab, ⌘2 = previous tab (aliasing ⌘⇧] / ⌘⇧[). Claiming the digit-1/2
+///   chords deliberately removes the digit-1/2 *jumps*, so direct jumps start at ⌘3.
+///
+/// Deserializes from / serializes to the lowercase token the config file uses (`jump` / `cycle`);
+/// an unrecognised value is a parse error. [`TabDigitKeys::as_str`] returns that same token for
+/// apps (warden) that build their config model by hand rather than through serde.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabDigitKeys {
+    #[default]
+    Jump,
+    Cycle,
+}
+
+impl TabDigitKeys {
+    /// The token used in the config file.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TabDigitKeys::Jump => "jump",
+            TabDigitKeys::Cycle => "cycle",
+        }
+    }
+
+    /// Whether ⌘1/⌘2 cycle tabs. This is the bridge to shell-core's menu builder, which takes a
+    /// plain `bool`: shell-core must never depend on config-core (the cores are mutually
+    /// independent), so the consuming app passes this rather than the enum itself.
+    pub fn is_cycle(self) -> bool {
+        matches!(self, TabDigitKeys::Cycle)
+    }
+}
+
 /// A non-fatal config issue surfaced to the user (logged on load, printed by `<app> validate`)
 /// without rejecting the config — e.g. a URL/dir repeated within a window, or a dir that is
 /// missing or not a directory.
@@ -100,6 +135,28 @@ mod tests {
     #[derive(Deserialize)]
     struct Wrap {
         d: Density,
+    }
+
+    #[derive(Deserialize)]
+    struct WrapK {
+        k: TabDigitKeys,
+    }
+
+    #[test]
+    fn tab_digit_keys_defaults_jump_and_round_trips_lowercase() {
+        assert_eq!(TabDigitKeys::default(), TabDigitKeys::Jump);
+        assert_eq!(TabDigitKeys::Jump.as_str(), "jump");
+        assert_eq!(TabDigitKeys::Cycle.as_str(), "cycle");
+        // `is_cycle` is the bridge the apps hand to shell-core's menu builder.
+        assert!(!TabDigitKeys::Jump.is_cycle());
+        assert!(TabDigitKeys::Cycle.is_cycle());
+        // Deserializes from the lowercase token…
+        let k: TabDigitKeys = toml::from_str("k = \"cycle\"\n")
+            .map(|w: WrapK| w.k)
+            .unwrap();
+        assert_eq!(k, TabDigitKeys::Cycle);
+        // …and an unknown token is a parse error, not a silent default.
+        assert!(toml::from_str::<WrapK>("k = \"wiggle\"\n").is_err());
     }
 
     #[test]

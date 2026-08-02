@@ -20,12 +20,14 @@ knowledge of any app's leaf tab fields.
 Seven modules, all leaf-agnostic:
 
 - `model` — the leaf-free config-model primitives: `Density` (whole-app chrome sizing; serde
-  round-trips the lowercase token, `as_str()` for apps that build the attribute by hand), `OpenOnLaunch`
-  (window launch-target enum), `Warning` (non-fatal `{window, message}` surfaced on load), the
-  logic-free `Group<T>` container (generic over each app's own leaf `Tab` — carries only a `name` and
-  its tabs, no leaf logic), and the shared serde field defaults (`default_true`,
-  `default_window_width`/`_height`). curator and lector re-export all of these; warden re-exports
-  `Density`/`Warning` (its model is hand-built through `raw → resolve`, but the shapes are identical).
+  round-trips the lowercase token, `as_str()` for apps that build the attribute by hand), `TabDigitKeys`
+  (whole-app ⌘1/⌘2 keybinding mode; the menu that implements it lives in shell-core, which takes a bool
+  so no core→core edge is created), `OpenOnLaunch` (window launch-target enum), `Warning` (non-fatal
+  `{window, message}` surfaced on load), the logic-free `Group<T>` container (generic over each app's
+  own leaf `Tab` — carries only a `name` and its tabs, no leaf logic), and the shared serde field
+  defaults (`default_true`, `default_window_width`/`_height`). curator and lector re-export all of
+  these; warden re-exports `Density`/`TabDigitKeys`/`Warning` (its model is hand-built through
+  `raw → resolve`, but the shapes are identical).
 - `roots` — project-tree discovery: `scan_root(dir, max_depth) -> Vec<PathBuf>` (walks a dir tree,
   stopping at every git root — dir or file, for worktrees — never descending into one, skipping
   hidden dirs, not following symlinks) and `tree_path(root_dir, project) -> Vec<String>` (the

@@ -4,7 +4,7 @@
 //! file tidy, and their divergence is multi-level (each app decorates `Config`, `WindowConfig`,
 //! and the leaf `Tab` — curator's `url`/`session`, warden's `dir`/`shell`/`probe`, lector's
 //! `dir`). This crate carries the parts that need no knowledge of any app's leaf: the leaf-free
-//! model primitives ([`model`] — [`Density`], [`Warning`], the logic-free
+//! model primitives ([`model`] — [`Density`], [`TabDigitKeys`], [`Warning`], the logic-free
 //! [`Group<T>`] container, and the shared serde field defaults), the house-style formatter
 //! ([`fmt`]), hex colour parsing ([`colour`]), structural config edits ([`edit`]), config-path
 //! resolution ([`paths`]), and starter-config seeding ([`seed`]). Each app keeps its own leaf
@@ -42,7 +42,8 @@ pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use model::{
-    default_true, default_window_height, default_window_width, Density, Group, Warning,
+    default_true, default_window_height, default_window_width, Density, Group, TabDigitKeys,
+    Warning,
 };
 pub use paths::{default_config_path, resolve_config_path};
 pub use roots::{
