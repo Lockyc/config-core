@@ -44,8 +44,11 @@ impl Density {
 ///   chords deliberately removes the digit-1/2 *jumps*, so direct jumps start at ⌘3.
 ///
 /// Deserializes from / serializes to the lowercase token the config file uses (`jump` / `cycle`);
-/// an unrecognised value is a parse error. [`TabDigitKeys::as_str`] returns that same token for
-/// apps (warden) that build their config model by hand rather than through serde.
+/// an unrecognised value is a parse error. [`TabDigitKeys::as_str`] mirrors [`Density::as_str`] —
+/// the same token, for a hand-built model or a formatter that doesn't go through serde — but
+/// unlike `Density::as_str` (used by warden's chrome DTO) it has no consumer yet: warden's
+/// `resolve_tab_digit_keys` matches the config string literals directly, and `tab_digit_keys`
+/// deliberately never reaches the chrome DTO the way density does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TabDigitKeys {

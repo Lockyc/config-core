@@ -26,8 +26,8 @@ Seven modules, all leaf-agnostic:
   `{window, message}` surfaced on load), the logic-free `Group<T>` container (generic over each app's
   own leaf `Tab` — carries only a `name` and its tabs, no leaf logic), and the shared serde field
   defaults (`default_true`, `default_window_width`/`_height`). curator and lector re-export all of
-  these; warden re-exports `Density`/`Warning` (its model is hand-built through
-  `raw → resolve`, but the shapes are identical; `TabDigitKeys` is forthcoming).
+  these; warden re-exports `Density`/`Warning`/`TabDigitKeys` too (its model is hand-built through
+  `raw → resolve`, but the shapes are identical — its own `TabDigitKeys` enum is gone).
 - `roots` — project-tree discovery: `scan_root(dir, max_depth) -> Vec<PathBuf>` (walks a dir tree,
   stopping at every git root — dir or file, for worktrees — never descending into one, skipping
   hidden dirs, not following symlinks) and `tree_path(root_dir, project) -> Vec<String>` (the
