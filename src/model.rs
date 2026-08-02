@@ -1,8 +1,8 @@
 //! Leaf-free config-model primitives shared by the curator, warden, and lector apps.
 //!
 //! These are the parts of the window → group → tab model that carry no knowledge of any app's
-//! leaf tab shape: the whole-app presentation enum [`Density`], the
-//! non-fatal [`Warning`], the logic-free [`Group<T>`] container (generic over each app's own
+//! leaf tab shape: the whole-app presentation enum [`Density`], the keybinding mode [`TabDigitKeys`],
+//! the non-fatal [`Warning`], the logic-free [`Group<T>`] container (generic over each app's own
 //! `Tab`), and the shared serde field defaults. Each app re-exports these under its own config
 //! crate so `app_config::Density` etc. keep resolving, and layers its own leaf types on top.
 
