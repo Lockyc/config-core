@@ -22,7 +22,7 @@ Seven modules, all leaf-agnostic:
 - `model` — the leaf-free config-model primitives: `Density` (whole-app chrome sizing; serde
   round-trips the lowercase token, `as_str()` for apps that build the attribute by hand), `TabDigitKeys`
   (whole-app ⌘1/⌘2 keybinding mode; the menu that implements it lives in shell-core, which takes a bool
-  so no core→core edge is created), `OpenOnLaunch` (window launch-target enum), `Warning` (non-fatal
+  so no core→core edge is created), `Warning` (non-fatal
   `{window, message}` surfaced on load), the logic-free `Group<T>` container (generic over each app's
   own leaf `Tab` — carries only a `name` and its tabs, no leaf logic), and the shared serde field
   defaults (`default_true`, `default_window_width`/`_height`). curator and lector re-export all of
@@ -104,7 +104,7 @@ resolution. Only add a primitive here when it is **leaf-free** (no app's tab-lea
 signature) and shared by **two or more** apps. `roots` is one precedent
 (`scan_root`/`RootDir`/`discover_projects` — consumed by warden + lector but not curator, so
 leaf-freeness, not "all three", is the gate); `model` is the other (`Density`/`Warning` across all
-three, `OpenOnLaunch`/`Group<T>`/`default_*` across curator + lector).
+three, `Group<T>`/`default_*` across curator + lector).
 
 The gate is **leaf-freeness**, and a *logic-free* generic container passes it: `Group<T>` is a `name`
 plus `Vec<T>` — it names each app's leaf generically but touches no leaf meaning, so it belongs here.
