@@ -5,11 +5,12 @@ edition = "2021"
 license = "MIT"
 description = "Shared TOML config primitives for the curator, warden, and lector apps — house-style formatter, hex colour parsing, leaf-agnostic structural editing, config-path resolution, and starter-config seeding."
 repository = "https://github.com/Lockyc/config-core"
+publish = false
 
 [dependencies]
 thiserror = "2"
 # Typed config-model primitives (model.rs) derive Serialize/Deserialize so the apps can
-# `toml::from_str` a config whose shared parts (Density, OpenOnLaunch, Group<T>, …) live here.
+# `toml::from_str` a config whose shared parts (Density, TabDigitKeys, Group<T>, …) live here.
 # config-core already spans TOML's *document* mode (toml_edit, for fmt/edit); hosting typed
 # primitives completes it into the *loading* mode too — every `*-config` sibling already pulls serde.
 serde = { version = "1", features = ["derive"] }
