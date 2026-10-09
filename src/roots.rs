@@ -106,7 +106,9 @@ pub enum RootError {
     ZeroDepth(u32),
 }
 
-fn expand_tilde(s: &str) -> PathBuf {
+/// Expand a leading `~` or `~/` to the home dir (input trimmed first). With no home dir, `~`
+/// becomes `.` and `~/rest` stays literal. Not canonicalized: a missing dir still resolves.
+pub fn expand_tilde(s: &str) -> PathBuf {
     let t = s.trim();
     if t == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -119,7 +121,9 @@ fn expand_tilde(s: &str) -> PathBuf {
     PathBuf::from(t)
 }
 
-fn basename(dir: &Path) -> String {
+/// A dir's last component, or the whole lossy path when it has none (`/`) — the default
+/// display name for a tab or root.
+pub fn basename(dir: &Path) -> String {
     dir.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| dir.to_string_lossy().into_owned())

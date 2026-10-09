@@ -47,8 +47,8 @@ pub use model::{
 };
 pub use paths::{default_config_path, resolve_config_path};
 pub use roots::{
-    discover_projects, resolve_root_dir, scan_root, tree_path, DiscoveredProject, RootDir,
-    RootError, DEFAULT_ROOT_DEPTH,
+    basename, discover_projects, expand_tilde, resolve_root_dir, scan_root, tree_path,
+    DiscoveredProject, RootDir, RootError, DEFAULT_ROOT_DEPTH,
 };
 pub use seed::{write_default_config, SeedError};
 
