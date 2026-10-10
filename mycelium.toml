@@ -1,5 +1,5 @@
 name    = "config-core"
-summary = "The shared config engine behind warden, curator and lector — parses, validates and house-formats each app's TOML config (preserving your comments), resolves its path, reads accent colours, and writes a starter config on first run."
+summary = "The shared config primitives behind warden, curator and lector — house-formats each app's TOML config, inserts tabs while preserving your comments, provides the leaf-free model types, resolves the config path, parses accent colours, discovers project roots, and writes a starter config on request."
 kind    = "library"
 status  = "active"
 tags    = ["config", "toml", "formatter", "shared-core"]
@@ -14,4 +14,4 @@ summary = "The shared window → group → tab config shape: a house-style TOML 
 
 [[provides]]
 name    = "config-path-seed"
-summary = "resolve_config_path()/default_config_path() — the identical $ENV-override-else-~/.config/<app>/config.toml resolution every app uses (fixed a set-but-empty-env bug two of three apps shipped) — and write_default_config(), an atomic, never-clobbering starter-config writer an app calls only on a user click (shell-core's home surface), never automatically."
+summary = "resolve_config_path()/default_config_path() — the identical $ENV-override-else-~/.config/<app>/config.toml resolution every app uses — and write_default_config(), an atomic, never-clobbering starter-config writer an app calls only on a user click (shell-core's home surface), never automatically."
