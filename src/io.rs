@@ -26,8 +26,9 @@ pub(crate) fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
 /// beside the link.
 ///
 /// A new file gets the tempfile's default mode; there is no existing file whose permissions could
-/// be carried over. Callers wanting create-if-absent semantics should check existence first — this
-/// function overwrites.
+/// be carried over. **Never overwrites:** anything already at `path` — including a dangling
+/// symlink — fails the rename with `ErrorKind::AlreadyExists`, atomically, so a file that appears
+/// after any caller-side check still survives.
 pub(crate) fn atomic_create(path: &Path, contents: &str) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
@@ -38,7 +39,7 @@ pub(crate) fn atomic_create(path: &Path, contents: &str) -> std::io::Result<()> 
     let mut tmp = tempfile::NamedTempFile::new_in(&dir)?;
     tmp.write_all(contents.as_bytes())?;
     tmp.flush()?;
-    tmp.persist(dir.join(name)).map_err(|e| e.error)?;
+    tmp.persist_noclobber(dir.join(name)).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -81,6 +82,16 @@ mod tests {
             std::fs::read_to_string(real.join("c.toml")).unwrap(),
             "y = 2\n"
         );
+    }
+
+    #[test]
+    fn atomic_create_refuses_an_existing_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.toml");
+        std::fs::write(&path, "mine = 1\n").unwrap();
+        let err = atomic_create(&path, "x = 1\n").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine = 1\n");
     }
 
     #[test]

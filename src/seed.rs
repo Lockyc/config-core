@@ -16,17 +16,20 @@ pub enum SeedError {
     Io(#[from] std::io::Error),
 }
 
-/// Write `template` to `path` if nothing is there. Creates parent dirs. **Never clobbers.**
+/// Write `template` to `path` if nothing is there. Creates parent dirs. **Never clobbers** — the
+/// no-overwrite rename is the existence check, so there is no window for a config that appears
+/// mid-call to be replaced.
 ///
-/// `Ok(true)` = written. `Ok(false)` = a file already existed and was left untouched — the caller
+/// `Ok(true)` = written. `Ok(false)` = something already existed at `path` (a file, or a dangling
+/// symlink) and was left untouched — the caller
 /// should say so rather than report success, since the user asked for a new config and got their
 /// old one.
 pub fn write_default_config(path: &Path, template: &str) -> Result<bool, SeedError> {
-    if path.exists() {
-        return Ok(false);
+    match atomic_create(path, template) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e.into()),
     }
-    atomic_create(path, template)?;
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -54,6 +57,22 @@ mod tests {
 
         assert!(!write_default_config(&path, "dark_mode = true\n").unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine = true\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn never_replaces_a_dangling_symlink() {
+        // A dotfiles-linked config whose target is missing is still the user's link — it must not
+        // be swapped for a plain file.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::os::unix::fs::symlink(dir.path().join("missing.toml"), &path).unwrap();
+
+        assert!(!write_default_config(&path, "dark_mode = true\n").unwrap());
+        assert!(std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]
