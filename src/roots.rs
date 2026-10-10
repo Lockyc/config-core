@@ -21,25 +21,25 @@ fn walk(dir: &Path, remaining: u32, out: &mut Vec<PathBuf>) {
     if remaining == 0 {
         return;
     }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return, // unreadable dir → skip silently
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        // Directories only; skip symlinks (cycle/noise) and hidden/dot dirs.
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        if !ft.is_dir() || ft.is_symlink() {
-            continue;
-        }
-        if entry.file_name().to_string_lossy().starts_with('.') {
-            continue;
-        }
-        walk(&path, remaining - 1, out);
+    for child in child_dirs(dir) {
+        walk(&child, remaining - 1, out);
     }
+}
+
+/// The children of `dir` a scan may enter, at every level: directories only, not symlinks (cycle/
+/// noise), not hidden/dot dirs. An unreadable dir or entry is skipped silently.
+fn child_dirs(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_type()
+                .is_ok_and(|ft| ft.is_dir() && !ft.is_symlink())
+                && !entry.file_name().to_string_lossy().starts_with('.')
+        })
+        .map(|entry| entry.path())
 }
 
 /// Absolute git-root project paths beneath `dir`, deterministic (sorted) order.
@@ -47,21 +47,8 @@ pub fn scan_root(dir: &Path, max_depth: u32) -> Vec<PathBuf> {
     let mut out = Vec::new();
     // The root dir itself doesn't count as a project even if it's a repo; start at its
     // children so `max_depth` counts levels *below* `dir`.
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let ft = match entry.file_type() {
-                Ok(ft) => ft,
-                Err(_) => continue,
-            };
-            if !ft.is_dir() || ft.is_symlink() {
-                continue;
-            }
-            if entry.file_name().to_string_lossy().starts_with('.') {
-                continue;
-            }
-            walk(&path, max_depth.saturating_sub(1), &mut out);
-        }
+    for child in child_dirs(dir) {
+        walk(&child, max_depth.saturating_sub(1), &mut out);
     }
     out.sort();
     out
