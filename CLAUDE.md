@@ -52,7 +52,7 @@ Seven modules, all leaf-agnostic:
   `[[window.tab]]`/`[[window.group.tab]]` table (atomic, comment/format-preserving via
   `toml_edit`; reuses the shared `atomic_write`). **Leaf-agnostic:** the caller passes an ordered
   field list, so it works for curator's (`url`/`session`) and warden's (`dir`/`shell`/`probe`)
-  leaves alike (lector doesn't consume this module — it re-exports only `fmt`/`colour`). New-group
+  leaves alike (lector doesn't consume this module). New-group
   creation is intentionally *not* built — an unknown `group` errors (`EditError::GroupNotFound`);
   the `Option<&str>` parameter is the seam for adding it later. A pre-existing non-array `tab` key
   errors as `EditError::MalformedTab`. `toml_edit` is re-exported (`config_core::toml_edit`) so a
