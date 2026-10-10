@@ -65,8 +65,7 @@ Seven modules, all leaf-agnostic:
   `~/.config`, not `dirs::config_dir()` (macOS: `~/Library/Application Support`), so the config
   stays in the dotfiles bare-repo workflow the user manages it with. A set-but-empty env var falls
   through to the default rather than yielding `PathBuf::from("")`, whose only symptom is a
-  confusing "cannot read config: No such file or directory" — warden had this right; curator and
-  lector didn't, until this was shared.
+  confusing "cannot read config: No such file or directory".
 - `seed` — `write_default_config(path, template) -> Result<bool, SeedError>`: write `template` to
   `path` if nothing is there yet, atomically, never clobbering an existing file (`Ok(false)` = a
   file already existed and was left alone). **Never fires automatically** — no launch hook, no

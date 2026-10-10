@@ -10,8 +10,7 @@ use std::path::PathBuf;
 /// so iterating never touches the developer's real config.
 ///
 /// A **set-but-empty** var falls through to the default rather than yielding `PathBuf::from("")`,
-/// whose only symptom is a confusing "cannot read config: No such file or directory". Two of the
-/// three apps shipped that bug before this was shared.
+/// whose only symptom is a confusing "cannot read config: No such file or directory".
 pub fn resolve_config_path(env_var: &str, app_dir: &str) -> PathBuf {
     if let Ok(p) = std::env::var(env_var) {
         if !p.is_empty() {
@@ -50,10 +49,8 @@ mod tests {
 
     #[test]
     fn set_but_empty_env_falls_through_to_the_default() {
-        // The bug this function exists to fix. `var_os(..).map(PathBuf::from)` — which curator and
-        // lector both shipped — yields PathBuf::from("") here, and the only symptom the user ever
-        // sees is "cannot read config: No such file or directory". warden got this right; this is
-        // warden's behaviour, shared.
+        // `var_os(..).map(PathBuf::from)` would yield PathBuf::from("") here, whose only symptom is
+        // "cannot read config: No such file or directory".
         std::env::set_var("CONFIG_CORE_TEST_EMPTY", "");
         assert_eq!(
             resolve_config_path("CONFIG_CORE_TEST_EMPTY", "demo"),
