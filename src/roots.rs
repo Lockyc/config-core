@@ -178,12 +178,11 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn tmp(name: &str) -> PathBuf {
-        let base =
-            std::env::temp_dir().join(format!("config-core-scan-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&base);
-        fs::create_dir_all(&base).unwrap();
-        base
+    /// A fresh temp tree, removed when the returned guard drops — hold it for the whole test.
+    fn tmp() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_path_buf();
+        (dir, base)
     }
     fn git(dir: &Path) {
         fs::create_dir_all(dir).unwrap();
@@ -192,7 +191,7 @@ mod tests {
 
     #[test]
     fn finds_git_roots_and_stops_at_them() {
-        let base = tmp("stop");
+        let (_dir, base) = tmp();
         git(&base.join("gh/lockyc/warden"));
         // a nested repo inside a git root must NOT be discovered separately
         git(&base.join("gh/lockyc/warden/vendor/sub"));
@@ -208,7 +207,7 @@ mod tests {
 
     #[test]
     fn respects_depth_and_skips_hidden() {
-        let base = tmp("depth");
+        let (_dir, base) = tmp();
         git(&base.join("a/b/c/deep")); // depth 4 below base
         git(&base.join(".hidden/repo")); // hidden dir skipped
         assert!(scan_root(&base, 2).is_empty()); // too shallow to reach it
@@ -217,7 +216,7 @@ mod tests {
 
     #[test]
     fn git_file_worktree_counts_as_root() {
-        let base = tmp("wt");
+        let (_dir, base) = tmp();
         let wt = base.join("worktree");
         fs::create_dir_all(&wt).unwrap();
         fs::write(wt.join(".git"), "gitdir: /somewhere\n").unwrap();
@@ -264,7 +263,7 @@ mod tests {
 
     #[test]
     fn discover_maps_each_project_with_treepath_and_section() {
-        let base = tmp("discover");
+        let (_dir, base) = tmp();
         git(&base.join("gh/lockyc/lector"));
         git(&base.join("solo"));
         let root = RootDir {
@@ -288,7 +287,7 @@ mod tests {
     #[test]
     fn discover_preserves_root_order_and_emits_overlap_twice() {
         // Cross-root dedup is the APP's job; discover emits a shared project once per root.
-        let base = tmp("discover-order");
+        let (_dir, base) = tmp();
         git(&base.join("proj"));
         let a = RootDir {
             name: "A".into(),
