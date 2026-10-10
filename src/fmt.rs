@@ -28,6 +28,31 @@ pub fn format_str(input: &str) -> String {
     separate_sections(&format(input, o))
 }
 
+/// Per line of `formatted`: whether it begins inside a multi-line (`"""` / `'''`) string — a
+/// continuation line of the string's value rather than TOML structure. Read from taplo's syntax
+/// tree, so quoting and escapes are judged by the TOML grammar, not a line scan.
+fn multi_line_string_lines(formatted: &str, lines: &[&str]) -> Vec<bool> {
+    use taplo::syntax::SyntaxKind::{MULTI_LINE_STRING, MULTI_LINE_STRING_LITERAL};
+    let spans: Vec<(usize, usize)> = taplo::parser::parse(formatted)
+        .into_syntax()
+        .descendants_with_tokens()
+        .filter(|e| matches!(e.kind(), MULTI_LINE_STRING | MULTI_LINE_STRING_LITERAL))
+        .map(|e| {
+            let r = e.text_range();
+            (usize::from(r.start()), usize::from(r.end()))
+        })
+        .collect();
+    let mut offset = 0;
+    lines
+        .iter()
+        .map(|l| {
+            let start = offset;
+            offset += l.len() + 1;
+            spans.iter().any(|&(s, e)| s < start && start < e)
+        })
+        .collect()
+}
+
 /// Normalize vertical spacing: **one blank line before every container section header**
 /// (`[[window]]`, `[[window.group]]`, …) while **nested tab headers stay tight** (no blank
 /// before a `[[…tab]]`). taplo only *caps* blank lines (set to 1 above), so this both inserts
@@ -41,8 +66,11 @@ pub fn format_str(input: &str) -> String {
 /// unchanged.
 fn separate_sections(formatted: &str) -> String {
     let lines: Vec<&str> = formatted.lines().collect();
-    let is_header = |l: &str| l.trim_start().starts_with('[');
-    let is_comment = |l: &str| l.trim_start().starts_with('#');
+    let in_string = multi_line_string_lines(formatted, &lines);
+    // Only lines outside a multi-line string are TOML structure; a string line starting with `[`
+    // or `#` is content and must never be respaced.
+    let is_header = |i: usize| !in_string[i] && lines[i].trim_start().starts_with('[');
+    let is_comment = |i: usize| !in_string[i] && lines[i].trim_start().starts_with('#');
     // The header's final dotted key segment, e.g. `[[window.group.tab]]` → "tab".
     let leaf = |l: &str| -> String {
         l.trim_start()
@@ -62,13 +90,13 @@ fn separate_sections(formatted: &str) -> String {
         // A section unit begins at a header not glued to a comment above it, or at
         // the top of a comment block leading (without a blank) into a header — the
         // comment block carries the spacing for the whole comment+header unit.
-        let header_here = is_header(line) && !(i > 0 && is_comment(lines[i - 1]));
-        let comment_lead = is_comment(line) && !(i > 0 && is_comment(lines[i - 1])) && {
+        let header_here = is_header(i) && !(i > 0 && is_comment(i - 1));
+        let comment_lead = is_comment(i) && !(i > 0 && is_comment(i - 1)) && {
             let mut k = i;
-            while k < lines.len() && is_comment(lines[k]) {
+            while k < lines.len() && is_comment(k) {
                 k += 1;
             }
-            k < lines.len() && is_header(lines[k])
+            k < lines.len() && is_header(k)
         };
         if header_here || comment_lead {
             // Find the header this unit leads to, and classify it.
@@ -76,7 +104,7 @@ fn separate_sections(formatted: &str) -> String {
                 i
             } else {
                 let mut k = i;
-                while k < lines.len() && is_comment(lines[k]) {
+                while k < lines.len() && is_comment(k) {
                     k += 1;
                 }
                 k
@@ -91,7 +119,7 @@ fn separate_sections(formatted: &str) -> String {
                     while j > 0 && out[j - 1].trim().is_empty() {
                         j -= 1;
                     }
-                    j > 0 && is_comment(out[j - 1])
+                    j > 0 && out[j - 1].trim_start().starts_with('#')
                 };
                 if !comment_above {
                     while out.last().is_some_and(|l| l.trim().is_empty()) {
@@ -308,6 +336,40 @@ dir=\"/c\"
             once.contains("    # note about a\n\n  [[window.tab]]"),
             "got:\n{once}"
         );
+    }
+
+    #[test]
+    fn multi_line_string_contents_are_never_respaced() {
+        // Lines inside a multi-line string that look like headers or comments are string content,
+        // not TOML structure: no blank may be inserted before or stripped from above them.
+        let input = r#"[[window]]
+title="w"
+[[window.tab]]
+cmd="""
+echo start
+[ -d x ] && cd x
+
+[[not.a.tab]]
+# not a comment
+[x]
+"""
+lit='''
+a
+
+[[window.tab]]
+'''
+"#;
+        let value = |src: &str, key: &str| -> String {
+            let doc = src.parse::<toml_edit::DocumentMut>().unwrap();
+            doc["window"][0]["tab"][0][key]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let out = format_str(input);
+        assert_eq!(value(&out, "cmd"), value(input, "cmd"), "got:\n{out}");
+        assert_eq!(value(&out, "lit"), value(input, "lit"), "got:\n{out}");
+        assert_eq!(format_str(&out), out);
     }
 
     #[test]
