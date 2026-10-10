@@ -25,37 +25,36 @@ impl Colour {
         let rest = s
             .strip_prefix('#')
             .ok_or_else(|| ColourError::NoHash(s.to_string()))?;
-        if !rest.is_ascii() {
-            return Err(ColourError::BadDigit(s.to_string()));
-        }
         if !rest.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(ColourError::BadDigit(s.to_string()));
         }
-        let expand = |h: &str| u8::from_str_radix(h, 16);
-        match rest.len() {
-            3 => {
-                let mut it = rest.chars().map(|c| {
-                    let d = c.to_string();
-                    expand(&format!("{d}{d}"))
-                });
-                let mut next = || it.next().unwrap();
-                let r = next().map_err(|_| ColourError::BadDigit(s.to_string()))?;
-                let g = next().map_err(|_| ColourError::BadDigit(s.to_string()))?;
-                let b = next().map_err(|_| ColourError::BadDigit(s.to_string()))?;
-                Ok(Colour { r, g, b })
-            }
-            6 => {
-                let r = expand(&rest[0..2]).map_err(|_| ColourError::BadDigit(s.to_string()))?;
-                let g = expand(&rest[2..4]).map_err(|_| ColourError::BadDigit(s.to_string()))?;
-                let b = expand(&rest[4..6]).map_err(|_| ColourError::BadDigit(s.to_string()))?;
-                Ok(Colour { r, g, b })
-            }
+        let d: Vec<u8> = rest.bytes().map(hex_val).collect();
+        match d[..] {
+            [r, g, b] => Ok(Colour {
+                r: r * 17,
+                g: g * 17,
+                b: b * 17,
+            }),
+            [r1, r0, g1, g0, b1, b0] => Ok(Colour {
+                r: r1 * 16 + r0,
+                g: g1 * 16 + g0,
+                b: b1 * 16 + b0,
+            }),
             _ => Err(ColourError::BadLength(s.to_string())),
         }
     }
 
     pub fn hex(&self) -> String {
         format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+}
+
+/// The value of one hex digit; the caller has already checked `b.is_ascii_hexdigit()`.
+fn hex_val(b: u8) -> u8 {
+    match b {
+        b'0'..=b'9' => b - b'0',
+        b'a'..=b'f' => b - b'a' + 10,
+        _ => b - b'A' + 10,
     }
 }
 
