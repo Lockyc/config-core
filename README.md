@@ -9,16 +9,17 @@ Shared TOML config primitives for the [curator](https://github.com/Lockyc/curato
 which share the same `window → group → tab` config shape and house style.
 
 It is not a generic config framework: each app keeps its own leaf tab type (curator:
-`url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`), validation, and cascade resolution.
+`url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`), validation, and the rules for how
+window and group settings pass down to each tab.
 config-core provides the leaf-agnostic pieces:
 
 - **`model`** — the leaf-free config-model primitives: `Density` (whole-app chrome sizing),
   `TabDigitKeys` (the ⌘1/⌘2 jump-vs-cycle keybinding mode), the non-fatal `Warning`, and the logic-free `Group<T>`
   container — a `name` plus a `Vec<T>` of each app's own leaf tab.
-  Plus the shared serde defaults (`default_true`, `default_window_width`/`_height`).
+  It also holds the shared serde defaults (`default_true`, `default_window_width`/`_height`).
 - **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
   fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
-  blank-line-separated containers with tight nested tabs. `format_file` rewrites atomically and
+  a blank line between window/group tables but none between the `tab` tables nested inside them. `format_file` rewrites atomically and
   only when bytes change, preserving symlinks and file mode. `fmt_cli` is the `fmt` CLI subcommand
   behind `warden fmt`, `curator fmt`, and `lector fmt`.
 - **`colour`** — `#rgb` / `#rrggbb` hex parsing for the per-window accent colour (`Colour::parse`,
@@ -28,8 +29,9 @@ config-core provides the leaf-agnostic pieces:
   `toml_edit`. The caller supplies an ordered field list for any leaf shape. An unknown group is an
   error. Field values are `config_core::toml_edit::Value` (`toml_edit` is re-exported; callers need
   no dependency of their own on it).
-- **`paths`** — config-path resolution (`resolve_config_path`, `default_config_path`). The named
-  env var wins when set and non-empty; a set-but-empty var falls through to the default
+- **`paths`** — config-path resolution (`resolve_config_path`, `default_config_path`). The
+  environment variable the app names (e.g. `WARDEN_CONFIG`) wins when set and non-empty; otherwise
+  the path is the default
   (`~/.config/<app_dir>/config.toml`).
 - **`seed`** — a starter config, on request only. `write_default_config(path, template)` writes
   `template` to `path` atomically if nothing is there yet, and never clobbers an existing file. The
