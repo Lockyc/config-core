@@ -1,6 +1,5 @@
 # config-core
 
-[![CI](https://github.com/lockyc/config-core/actions/workflows/ci.yml/badge.svg)](https://github.com/lockyc/config-core/actions/workflows/ci.yml)
 ![Built with Rust](https://img.shields.io/badge/built%20with-Rust-CE412B?logo=rust&logoColor=white)
 [![License](https://img.shields.io/github/license/Lockyc/config-core)](LICENSE)
 

@@ -129,5 +129,4 @@ commit/merge on `main`; **don't open pull requests.**
 ## Test/build
 
 `cargo test` (unit + golden formatter tests), `cargo fmt`, `cargo clippy` — all green before a
-push; `just gate` runs the three together. CI (`.github/workflows/ci.yml`) runs the same gate on
-push to `main` and on every PR; the local gate is still the fast pre-push loop.
+push; `just gate` runs the three together and is the only gate.

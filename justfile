@@ -30,7 +30,7 @@ fmt:
 build:
     cargo build
 
-# Non-mutating pre-merge gate: rustfmt check, clippy, and the test suite. What CI would run.
+# Non-mutating pre-merge gate: rustfmt check, clippy, and the test suite.
 [group("check")]
 gate:
     cargo fmt --check
