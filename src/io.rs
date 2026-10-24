@@ -12,7 +12,8 @@ pub(crate) fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
     let dir = target.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(contents.as_bytes())?;
-    tmp.flush()?;
+    // On disk before the rename, or a crash right after it can leave an empty config.
+    tmp.as_file().sync_all()?;
     if let Ok(meta) = std::fs::metadata(&target) {
         let _ = tmp.as_file().set_permissions(meta.permissions());
     }
@@ -38,7 +39,7 @@ pub(crate) fn atomic_create(path: &Path, contents: &str) -> std::io::Result<()> 
     })?;
     let mut tmp = tempfile::NamedTempFile::new_in(&dir)?;
     tmp.write_all(contents.as_bytes())?;
-    tmp.flush()?;
+    tmp.as_file().sync_all()?;
     tmp.persist_noclobber(dir.join(name)).map_err(|e| e.error)?;
     Ok(())
 }

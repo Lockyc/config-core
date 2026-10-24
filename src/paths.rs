@@ -12,12 +12,16 @@ use std::path::PathBuf;
 /// A **set-but-empty** var falls through to the default rather than yielding `PathBuf::from("")`,
 /// whose only symptom is a confusing "cannot read config: No such file or directory".
 pub fn resolve_config_path(env_var: &str, app_dir: &str) -> PathBuf {
-    if let Ok(p) = std::env::var(env_var) {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    resolve_from(std::env::var(env_var).ok(), app_dir)
+}
+
+/// The pure half of [`resolve_config_path`], given the env var's value. Tests call this rather
+/// than set process env, which races every other test thread reading `HOME`.
+fn resolve_from(value: Option<String>, app_dir: &str) -> PathBuf {
+    match value {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => default_config_path(app_dir),
     }
-    default_config_path(app_dir)
 }
 
 /// `~/.config/<app_dir>/config.toml`.
@@ -39,31 +43,28 @@ mod tests {
 
     #[test]
     fn env_override_wins_when_set_and_non_empty() {
-        std::env::set_var("CONFIG_CORE_TEST_VAR", "/tmp/explicit.toml");
         assert_eq!(
-            resolve_config_path("CONFIG_CORE_TEST_VAR", "demo"),
+            resolve_from(Some("/tmp/explicit.toml".into()), "demo"),
             std::path::PathBuf::from("/tmp/explicit.toml")
         );
-        std::env::remove_var("CONFIG_CORE_TEST_VAR");
     }
 
     #[test]
     fn set_but_empty_env_falls_through_to_the_default() {
         // `var_os(..).map(PathBuf::from)` would yield PathBuf::from("") here, whose only symptom is
         // "cannot read config: No such file or directory".
-        std::env::set_var("CONFIG_CORE_TEST_EMPTY", "");
         assert_eq!(
-            resolve_config_path("CONFIG_CORE_TEST_EMPTY", "demo"),
+            resolve_from(Some(String::new()), "demo"),
             default_config_path("demo")
         );
-        std::env::remove_var("CONFIG_CORE_TEST_EMPTY");
     }
 
     #[test]
     fn unset_env_falls_through_to_the_default() {
-        std::env::remove_var("CONFIG_CORE_TEST_UNSET");
+        assert_eq!(resolve_from(None, "demo"), default_config_path("demo"));
+        // The env-reading wrapper, against a var no test ever sets.
         assert_eq!(
-            resolve_config_path("CONFIG_CORE_TEST_UNSET", "demo"),
+            resolve_config_path("CONFIG_CORE_TEST_NEVER_SET", "demo"),
             default_config_path("demo")
         );
     }

@@ -1,5 +1,5 @@
 //! Hex colour parsing for the per-window accent colour. Accepts `#rgb` and `#rrggbb`
-//! (case-insensitive), the forms both apps' chrome banners render.
+//! (case-insensitive), the forms the apps' chrome banners render.
 
 use thiserror::Error;
 

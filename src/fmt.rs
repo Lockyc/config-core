@@ -28,6 +28,28 @@ pub fn format_str(input: &str) -> String {
     separate_sections(&format(input, o))
 }
 
+/// Per line of `formatted`: whether it is a table or array-of-tables header (`[x]` / `[[x]]`).
+/// Read from taplo's syntax tree, so an element line of a multi-line array of arrays (also
+/// starting with `[`) is not mistaken for one.
+fn header_lines(formatted: &str, lines: &[&str]) -> Vec<bool> {
+    use taplo::syntax::SyntaxKind::{TABLE_ARRAY_HEADER, TABLE_HEADER};
+    let starts: Vec<usize> = taplo::parser::parse(formatted)
+        .into_syntax()
+        .descendants_with_tokens()
+        .filter(|e| matches!(e.kind(), TABLE_HEADER | TABLE_ARRAY_HEADER))
+        .map(|e| usize::from(e.text_range().start()))
+        .collect();
+    let mut offset = 0;
+    lines
+        .iter()
+        .map(|l| {
+            let first = offset + (l.len() - l.trim_start().len());
+            offset += l.len() + 1;
+            starts.contains(&first)
+        })
+        .collect()
+}
+
 /// Per line of `formatted`: whether it begins inside a multi-line (`"""` / `'''`) string — a
 /// continuation line of the string's value rather than TOML structure. Read from taplo's syntax
 /// tree, so quoting and escapes are judged by the TOML grammar, not a line scan.
@@ -59,7 +81,7 @@ fn multi_line_string_lines(formatted: &str, lines: &[&str]) -> Vec<bool> {
 /// the missing separators and strips blanks that crept in before a tab.
 ///
 /// "Tight vs separated" keys on the header's leaf segment — a leaf of `tab` (the per-tab entry
-/// both apps use) is tight; anything else is a container, separated. A comment block glued to a
+/// every app uses) is tight; anything else is a container, separated. A comment block glued to a
 /// header (no blank between them) is treated as part of that section, so the inserted/stripped
 /// blank applies above the comment, never between the comment and its header. No blank is added
 /// at the very start of the file. Idempotent: a file already spaced this way is returned
@@ -67,9 +89,10 @@ fn multi_line_string_lines(formatted: &str, lines: &[&str]) -> Vec<bool> {
 fn separate_sections(formatted: &str) -> String {
     let lines: Vec<&str> = formatted.lines().collect();
     let in_string = multi_line_string_lines(formatted, &lines);
-    // Only lines outside a multi-line string are TOML structure; a string line starting with `[`
-    // or `#` is content and must never be respaced.
-    let is_header = |i: usize| !in_string[i] && lines[i].trim_start().starts_with('[');
+    let headers = header_lines(formatted, &lines);
+    // Only lines outside a multi-line string are TOML structure; a string line starting with `#`
+    // is content and must never be respaced.
+    let is_header = |i: usize| headers[i];
     let is_comment = |i: usize| !in_string[i] && lines[i].trim_start().starts_with('#');
     // The header's final dotted key segment, e.g. `[[window.group.tab]]` → "tab".
     let leaf = |l: &str| -> String {
@@ -156,8 +179,7 @@ pub fn format_file(path: &Path) -> std::io::Result<bool> {
 /// The shared `fmt` CLI subcommand: format `path` in the house style, or — with `check` — report
 /// whether it *would* change without writing. Returns a process exit code (0 ok / 1 on a read,
 /// TOML-syntax, or write error). App-agnostic: the caller resolves its own default config path and
-/// passes it in, so warden's and curator's `fmt` subcommands share one implementation + identical
-/// messages. `validate` stays per-app (it prints each app's own leaf schema); `fmt` is schema-free.
+/// passes it in, so every app's `fmt` subcommand shares one implementation + identical messages. `validate` stays per-app (it prints each app's own leaf schema); `fmt` is schema-free.
 pub fn fmt_cli(check: bool, path: &Path) -> i32 {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -241,6 +263,18 @@ mod tests {
         // Runs of blank lines are capped at one (taplo allowed_blank_lines=1).
         let input = "[[a]]\nx=1\n\n\n\n[[b]]\ny=2\n";
         assert_eq!(format_str(input), "[[a]]\n  x = 1\n\n[[b]]\n  y = 2\n");
+    }
+
+    #[test]
+    fn nested_array_elements_are_not_headers() {
+        // An array of arrays wider than column_width expands one element per line,
+        // each starting with `[`; none of them is a section header to separate.
+        let long = "x".repeat(60);
+        let input = format!("[[w]]\nargs = [[\"{long}\", \"{long}\"], [\"{long}\"]]\n");
+        let out = format_str(&input);
+        assert!(out.lines().count() > 3, "expected an expanded array: {out}");
+        assert!(!out.contains("\n\n"), "no blank inside the array: {out}");
+        assert_eq!(format_str(&out), out, "idempotent");
     }
 
     #[test]
