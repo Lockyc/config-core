@@ -17,82 +17,30 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Seven modules, all leaf-agnostic:
+Seven modules, all leaf-agnostic. Each module's docblocks carry the reasons for its behaviour.
 
-- `model` — the leaf-free config-model primitives: `Density` (whole-app chrome sizing; serde
-  round-trips the lowercase token, `as_str()` for apps that build the attribute by hand), `TabDigitKeys`
-  (whole-app ⌘1/⌘2 keybinding mode; the menu that implements it lives in shell-core, which takes a bool
-  so no core→core edge is created), `Warning` (non-fatal
-  `{window, message}` surfaced on load), the logic-free `Group<T>` container (generic over each app's
-  own leaf `Tab` — carries only a `name` and its tabs, no leaf logic), and the shared serde field
-  defaults (`default_true`, `default_window_width`/`_height`). curator and lector re-export all of
-  these; warden re-exports `Density`/`Warning`/`TabDigitKeys` too (its model is hand-built through
-  `raw → resolve`, but the shapes are identical — its own `TabDigitKeys` enum is gone).
-- `roots` — project-tree discovery: `scan_root(dir, max_depth) -> Vec<PathBuf>` (walks a dir tree,
-  stopping at every git root — dir or file, for worktrees — never descending into one, skipping
-  hidden dirs, not following symlinks) and `tree_path(root_dir, project) -> Vec<String>` (the
-  folder segments between them, for chrome-core's folder-tree nesting). `resolve_root_dir(name,
-  dir, depth) -> Result<RootDir, RootError>` validates + tilde-expands a raw root (name defaults to
-  the dir's basename, depth to [`roots::DEFAULT_ROOT_DEPTH`]). `discover_projects(&[RootDir]) ->
-  Vec<DiscoveredProject>` flattens a window's roots in order, sorted within each root, with **no
-  cross-root dedup** — a project reachable via two roots is emitted once per root; the consuming
-  app collapses duplicates by its own tab identity. Consumed by warden and lector, not curator (see
-  the charter note below).
-- `fmt` — `format_str(&str) -> String` (pure) and `format_file(&Path) -> io::Result<bool>` (atomic,
-  diff-guarded, symlink/mode-preserving). Wraps `taplo` with a fixed house style; `separate_sections`
-  post-processes blank lines (containers separated, `[[…tab]]` leaves tight). The golden tests pin
-  real-config output so a `taplo` bump can't silently change formatting. `format_file` returns
-  `Ok(false)` when nothing changed — that no-op-on-clean property is what makes it safe to drive
-  from a file watcher (format-on-save) without looping. `fmt_cli(check, &path) -> i32` is the shared
-  `fmt` **CLI subcommand** all three apps delegate to (read → reject non-TOML → format/`--check`, with
-  identical messages + exit codes); the caller passes its own resolved default config path. `validate`
-  is *not* here — it prints each app's own leaf schema, which this crate deliberately doesn't know.
-- `colour` — `Colour::parse` / `Colour::hex` for `#rgb`/`#rrggbb` accent colours.
-- `edit` — `add_tab(path, window_title, group, &[(&str, toml_edit::Value)])` appends a
-  `[[window.tab]]`/`[[window.group.tab]]` table (atomic, comment/format-preserving via
-  `toml_edit`; reuses the shared `atomic_write`). **Leaf-agnostic:** the caller passes an ordered
-  field list, so it works for curator's (`url`/`session`) and warden's (`dir`/`shell`/`probe`)
-  leaves alike (lector doesn't consume this module). New-group
-  creation is intentionally *not* built — an unknown `group` errors (`EditError::GroupNotFound`);
-  the `Option<&str>` parameter is the seam for adding it later. A pre-existing non-array `tab` key
-  errors as `EditError::MalformedTab`. `toml_edit` is re-exported (`config_core::toml_edit`) so a
-  consumer can name the field-value type without pinning its own `toml_edit` dependency (which
-  would risk a version skew against this crate's API).
-- `paths` — `resolve_config_path(env_var, app_dir) -> PathBuf` and
-  `default_config_path(app_dir) -> PathBuf`. Every app resolves its config the same way — the
-  named env var if set **and non-empty**, else `~/.config/<app_dir>/config.toml` — and differs only
-  in its env-var name and `~/.config` subdirectory, both passed in by the caller. Deliberately
-  `~/.config`, not `dirs::config_dir()` (macOS: `~/Library/Application Support`), so the config
-  stays in the dotfiles bare-repo workflow the user manages it with. A set-but-empty env var falls
-  through to the default rather than yielding `PathBuf::from("")`, whose only symptom is a
-  confusing "cannot read config: No such file or directory".
-- `seed` — `write_default_config(path, template) -> Result<bool, SeedError>`: write `template` to
-  `path` if nothing is there yet, atomically, never clobbering an existing file (`Ok(false)` = a
-  file already existed and was left alone). **Never fires automatically** — no launch hook, no
-  first-run marker; an app calls it only when the user clicks a "Create a starter config" button
-  (shell-core's home surface). The mechanism (where, atomically, never-clobber) is shared; the
-  template string is the caller's own leaf schema, passed in.
+- `model` — leaf-free model primitives (`Density`, `TabDigitKeys`, `Warning`, the logic-free
+  `Group<T>`, shared serde defaults). All three apps re-export them.
+- `roots` — project-tree discovery (`scan_root`, `resolve_root_dir`, `discover_projects`,
+  `tree_path`). Consumed by warden and lector.
+- `fmt` — the house TOML formatter (`format_str`, `format_file`) and the shared `fmt` CLI
+  subcommand (`fmt_cli`) all three apps delegate to. `validate` stays per-app: it prints each
+  app's own leaf schema.
+- `colour` — `Colour::parse` / `Colour::hex` for accent colours.
+- `edit` — `add_tab`, a comment-preserving `[[…tab]]` append taking a caller-ordered field list.
+  Consumed by curator and warden. `toml_edit` is re-exported (`config_core::toml_edit`) so a
+  consumer can name the field-value type without pinning its own `toml_edit`, which would risk a
+  version skew against this crate's API.
+- `paths` — `resolve_config_path` / `default_config_path`: every app's config location, differing
+  only in the env-var name and `~/.config` subdirectory passed in.
+- `seed` — `write_default_config`: an atomic, never-clobbering starter config, written only when
+  the user asks (shell-core's home surface). The template is the caller's.
 
-**`resolve_config_path` and `write_default_config` are path/filesystem primitives, not TOML-content
-primitives like the original three modules — and that's exactly the scope this crate's own bar
-already covers, not an expansion of it.** They qualify on the same test as everything else here:
-identical and leaf-free in all three apps. Every app resolves its config path the same way and
-differs only in an env-var name and a `~/.config` subdirectory (both parameters); every app seeds a
-starter config the same way (atomically, never clobbering) and differs only in the template
-contents (also a parameter). Neither knows a single leaf field.
+`paths` and `seed` are filesystem primitives rather than TOML-content ones, and qualify on the same
+test as everything else here: identical and leaf-free in all three apps.
 
-**Footgun: `atomic_write` and `atomic_create` are not interchangeable — `atomic_write` requires the
-target to already exist.** `io::atomic_write` opens with `std::fs::canonicalize(path)`, which
-**fails** (`ErrorKind::NotFound`) when nothing is at `path` yet — that's deliberate: canonicalizing
-the *target* is what keeps a rewrite landing on a dotfiles-symlinked config in place rather than
-replacing the link with a plain file, and `format_file`/`edit::add_tab` both depend on that
-resolution. Seeding a config where none exists is the opposite case, so `io::atomic_create` is a
-**sibling**, not a relaxed `atomic_write`: it canonicalizes the *parent* directory instead, so a
-`~/.config` symlinked out of a dotfiles repo still receives the real file through the link. A test
-(`atomic_write_still_refuses_a_nonexistent_target`) pins that `atomic_write` keeps refusing a
-missing target — don't "simplify" the two into one function; that would either break the
-symlinked-config rewrite case or make `atomic_write` silently start creating files where an
-existing one was expected.
+`io::atomic_write` and `io::atomic_create` are deliberately two functions; see `io.rs` and
+`atomic_write_still_refuses_a_nonexistent_target`.
 
 **Do not** grow this into a generic config framework or genericize a window/group/tab model over a
 leaf **trait**. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
@@ -103,7 +51,8 @@ resolution. Only add a primitive here when it is **leaf-free** (no app's tab-lea
 signature) and shared by **two or more** apps. `roots` is one precedent
 (`scan_root`/`RootDir`/`discover_projects` — consumed by warden + lector but not curator, so
 leaf-freeness, not "all three", is the gate); `model` is the other (`Density`/`Warning` across all
-three, `Group<T>`/`default_*` across curator + lector).
+three, `Group<T>`/`default_*` across curator + lector). No core→core edges: shell-core's menu takes
+a bool for `TabDigitKeys` rather than depending on this crate.
 
 The gate is **leaf-freeness**, and a *logic-free* generic container passes it: `Group<T>` is a `name`
 plus `Vec<T>` — it names each app's leaf generically but touches no leaf meaning, so it belongs here.
@@ -128,5 +77,4 @@ commit/merge on `main`; **don't open pull requests.**
 
 ## Test/build
 
-`cargo test` (unit + golden formatter tests), `cargo fmt`, `cargo clippy` — all green before a
-push; `just gate` runs the three together and is the only gate.
+`just gate` (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`) is the only gate.

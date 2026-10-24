@@ -51,9 +51,8 @@ config-core = { git = "https://github.com/Lockyc/config-core", rev = "<commit>" 
 ## Develop
 
 ```sh
-cargo test    # unit + golden formatter tests
-cargo fmt
-cargo clippy
+just gate     # cargo fmt --check, clippy -D warnings, tests
+cargo test    # the quick loop: unit + golden formatter tests
 ```
 
 ## License
