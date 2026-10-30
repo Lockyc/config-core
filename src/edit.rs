@@ -35,11 +35,36 @@ pub fn set_key(path: &Path, key: &str, v: Value) -> Result<(), EditError> {
             *old.decor_mut() = decor;
         }
         None => {
+            let first_key = !doc.iter().any(|(_, item)| item.is_value());
             doc.insert(key, value(v));
+            // The file's header comment hangs on the first table while the root has no keys; it
+            // moves onto the new key so it stays the file's header.
+            if first_key {
+                if let Some(header) = take_first_table_prefix(&mut doc) {
+                    if let Some(mut k) = doc.key_mut(key) {
+                        k.leaf_decor_mut().set_prefix(header);
+                    }
+                }
+            }
         }
     }
     atomic_write(path, &doc.to_string())?;
     Ok(())
+}
+
+/// Takes the first table's leading comment, leaving one blank line in its place.
+fn take_first_table_prefix(doc: &mut DocumentMut) -> Option<String> {
+    let decor = doc.iter_mut().find_map(|(_, item)| match item {
+        Item::Table(t) => Some(t.decor_mut()),
+        Item::ArrayOfTables(a) => a.get_mut(0).map(|t| t.decor_mut()),
+        _ => None,
+    })?;
+    let header = decor.prefix()?.as_str()?.to_string();
+    if header.trim().is_empty() {
+        return None;
+    }
+    decor.set_prefix("\n");
+    Some(header)
 }
 
 /// Append a `[[window.tab]]` (group `None`) or `[[window.group.tab]]` (group `Some(name)`) table
@@ -129,6 +154,18 @@ mod tests {
         assert!(key < out.find("[[window]]").unwrap(), "{out}");
         let t: toml::Table = toml::from_str(&out).unwrap();
         assert_eq!(t["tab_digit_keys"].as_str(), Some("cycle"));
+    }
+
+    #[test]
+    fn set_key_keeps_a_header_comment_above_a_new_first_key() {
+        // With no root keys, toml_edit hangs the file's header comment on the first table.
+        let (_d, p) = write_tmp("# header\n\n[[window]]\ntitle = \"a\"\n");
+        set_key(&p, "tab_digit_keys", "cycle".into()).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            out,
+            "# header\n\ntab_digit_keys = \"cycle\"\n\n[[window]]\ntitle = \"a\"\n"
+        );
     }
 
     #[test]
