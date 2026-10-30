@@ -1,9 +1,10 @@
 //! Leaf-agnostic structural edits to a config file. Each app builds its own field list (curator:
 //! `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls `add_tab`; this module knows
-//! nothing about what the fields mean. `set_key` sets one root key (an app's menu toggle writing
-//! its setting). Comment/format preserving — only the touched entry changes.
+//! nothing about what the fields mean. `set_key` sets one root key; `toggle_tab_digit_keys` is the
+//! apps' Cycle Tabs menu toggle. Comment/format preserving — only the touched entry changes.
 
 use crate::io::atomic_write;
+use crate::model::TabDigitKeys;
 use std::path::Path;
 use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table, Value};
 
@@ -27,6 +28,7 @@ pub enum EditError {
 pub fn set_key(path: &Path, key: &str, v: Value) -> Result<(), EditError> {
     let src = std::fs::read_to_string(path)?;
     let mut doc: DocumentMut = src.parse()?;
+    let has_root_keys = doc.iter().any(|(_, item)| item.is_value());
     match doc.get_mut(key).and_then(Item::as_value_mut) {
         // Keeps the entry's own decor (a trailing `# why` comment) by swapping only the value.
         Some(old) => {
@@ -34,37 +36,60 @@ pub fn set_key(path: &Path, key: &str, v: Value) -> Result<(), EditError> {
             *old = v;
             *old.decor_mut() = decor;
         }
-        None => {
-            let first_key = !doc.iter().any(|(_, item)| item.is_value());
+        None if has_root_keys => {
             doc.insert(key, value(v));
-            // The file's header comment hangs on the first table while the root has no keys; it
-            // moves onto the new key so it stays the file's header.
-            if first_key {
-                if let Some(header) = take_first_table_prefix(&mut doc) {
-                    if let Some(mut k) = doc.key_mut(key) {
-                        k.leaf_decor_mut().set_prefix(header);
-                    }
-                }
-            }
+        }
+        // The root's first key. toml_edit hangs the file's comments on whichever table renders
+        // first (or on the document's trailer), so the line is placed in the text instead.
+        None => {
+            let mut line = DocumentMut::new();
+            line.insert(key, value(v));
+            let out = insert_first_key(&src, &line.to_string());
+            out.parse::<DocumentMut>()?;
+            atomic_write(path, &out)?;
+            return Ok(());
         }
     }
     atomic_write(path, &doc.to_string())?;
     Ok(())
 }
 
-/// Takes the first table's leading comment, leaving one blank line in its place.
-fn take_first_table_prefix(doc: &mut DocumentMut) -> Option<String> {
-    let decor = doc.iter_mut().find_map(|(_, item)| match item {
-        Item::Table(t) => Some(t.decor_mut()),
-        Item::ArrayOfTables(a) => a.get_mut(0).map(|t| t.decor_mut()),
-        _ => None,
-    })?;
-    let header = decor.prefix()?.as_str()?.to_string();
-    if header.trim().is_empty() {
-        return None;
-    }
-    decor.set_prefix("\n");
-    Some(header)
+/// `src` (a file with no root keys) with `line` added after its header comment block — up to the
+/// last blank line before the first table, so a comment directly above that table stays its own —
+/// and set off from the table by a blank line.
+fn insert_first_key(src: &str, line: &str) -> String {
+    let lines: Vec<&str> = src.split_inclusive('\n').collect();
+    let Some(first_table) = lines.iter().position(|l| l.trim_start().starts_with('[')) else {
+        if src.trim().is_empty() {
+            return line.to_string();
+        }
+        let sep = if src.ends_with('\n') { "\n" } else { "\n\n" };
+        return format!("{src}{sep}{line}");
+    };
+    let head = &lines[..first_table];
+    let split = head
+        .iter()
+        .rposition(|l| l.trim().is_empty())
+        .map_or(0, |i| i + 1);
+    format!(
+        "{}{line}\n{}",
+        lines[..split].concat(),
+        lines[split..].concat()
+    )
+}
+
+/// Flips `tab_digit_keys` from what the file says (absent is `jump`) and returns the new mode.
+/// Reading the file, not the app's loaded config, keeps two clicks inside one reload from both
+/// writing the same value.
+pub fn toggle_tab_digit_keys(path: &Path) -> Result<TabDigitKeys, EditError> {
+    let doc: DocumentMut = std::fs::read_to_string(path)?.parse()?;
+    let now = match doc.get("tab_digit_keys").and_then(Item::as_str) {
+        Some("cycle") => TabDigitKeys::Cycle,
+        _ => TabDigitKeys::Jump,
+    };
+    let next = now.toggled();
+    set_key(path, "tab_digit_keys", next.as_str().into())?;
+    Ok(next)
 }
 
 /// Append a `[[window.tab]]` (group `None`) or `[[window.group.tab]]` (group `Some(name)`) table
@@ -166,6 +191,55 @@ mod tests {
             out,
             "# header\n\ntab_digit_keys = \"cycle\"\n\n[[window]]\ntitle = \"a\"\n"
         );
+    }
+
+    /// A new first root key goes after the file's header block and before the comment that
+    /// belongs to the first table, whatever shape the file has.
+    #[test]
+    fn set_key_places_a_new_first_key_in_every_layout() {
+        let cases = [
+            // Comments only.
+            ("# header\n# more\n", "# header\n# more\n\nk = 1\n"),
+            // An implicit first table.
+            (
+                "# header\n\n[window.a]\nx = 1\n",
+                "# header\n\nk = 1\n\n[window.a]\nx = 1\n",
+            ),
+            // The first table carries its own comment.
+            (
+                "# header\n\n# Work window\n[[window]]\ntitle = \"a\"\n",
+                "# header\n\nk = 1\n\n# Work window\n[[window]]\ntitle = \"a\"\n",
+            ),
+            // No comments at all.
+            (
+                "[[window]]\ntitle = \"a\"\n",
+                "k = 1\n\n[[window]]\ntitle = \"a\"\n",
+            ),
+            // Empty file.
+            ("", "k = 1\n"),
+        ];
+        for (before, after) in cases {
+            let (_d, p) = write_tmp(before);
+            set_key(&p, "k", 1i64.into()).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&p).unwrap(),
+                after,
+                "from {before:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn toggle_flips_what_the_file_says() {
+        let (_d, p) = write_tmp("tab_digit_keys = \"cycle\"\n");
+        assert_eq!(toggle_tab_digit_keys(&p).unwrap(), TabDigitKeys::Jump);
+        // Two quick toggles land back where they started, whatever the app has loaded.
+        assert_eq!(toggle_tab_digit_keys(&p).unwrap(), TabDigitKeys::Cycle);
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(out, "tab_digit_keys = \"cycle\"\n");
+        // Absent is the default, `jump`.
+        let (_d, p) = write_tmp("# c\n");
+        assert_eq!(toggle_tab_digit_keys(&p).unwrap(), TabDigitKeys::Cycle);
     }
 
     #[test]
