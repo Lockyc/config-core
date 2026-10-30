@@ -145,24 +145,25 @@ pub fn remove_key(path: &Path, key: &str) -> Result<bool, EditError> {
     let header = prefix
         .as_deref()
         .filter(|_| first)
-        .and_then(|p| p.rfind("\n\n").map(|i| &p[..i + 2]))
-        .filter(|h| !h.trim().is_empty());
+        .and_then(|p| p.rfind("\n\n").map(|i| p[..i].trim_end()))
+        .filter(|h| !h.is_empty());
     if let Some(header) = header {
-        prepend_to_first(&mut doc, header);
+        prepend_to_first(&mut doc, &format!("{header}\n\n"));
     }
     save(path, &doc)?;
     Ok(true)
 }
 
-/// Puts `text` (comment lines) in front of whatever `doc` now starts with: a root key, or the
-/// first table.
+/// Puts `text` (comment lines ending in one blank line) in front of whatever `doc` now starts
+/// with: a root key, or the first table. The blank lines that set that item off go, so `text`'s
+/// own blank line is the only one between them.
 fn prepend_to_first(doc: &mut DocumentMut, text: &str) {
     let Some((mut key, item)) = doc.as_table_mut().iter_mut().next() else {
         let trailing = doc.trailing().as_str().unwrap_or("").to_string();
-        doc.set_trailing(format!("{text}{trailing}"));
+        doc.set_trailing(format!("{text}{}", trailing.trim_start()));
         return;
     };
-    let joined = |own: Option<&str>| format!("{text}{}", own.unwrap_or(""));
+    let joined = |own: Option<&str>| format!("{text}{}", own.unwrap_or("").trim_start());
     match item {
         Item::Value(_) => {
             let own = key
@@ -477,26 +478,20 @@ mod tests {
         assert!(remove_key(&p, "title").unwrap());
         assert!(remove_key(&p, "colour").unwrap());
         assert!(!remove_key(&p, "colour").unwrap(), "already gone");
-        let out = std::fs::read_to_string(&p).unwrap();
-        assert!(out.starts_with("# header\n"), "{out}");
-        assert!(
-            !out.contains("window's name") && !out.contains("accent"),
-            "{out}"
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "# header\n\n# Sizing.\ndensity = \"compact\"\n\n[[window]]\ntitle = \"a\"\n"
         );
-        assert!(out.contains("# Sizing.\ndensity = \"compact\""), "{out}");
-        let t: toml::Table = toml::from_str(&out).unwrap();
-        assert!(!t.contains_key("title") && !t.contains_key("colour"));
-        assert_eq!(t["window"].as_array().unwrap().len(), 1);
     }
 
     #[test]
     fn remove_key_keeps_the_header_when_only_tables_follow() {
         let (_d, p) = write_tmp("# header\n\ntitle = \"x\"\n\n[[window]]\ntitle = \"a\"\n");
         assert!(remove_key(&p, "title").unwrap());
-        let out = std::fs::read_to_string(&p).unwrap();
-        assert!(out.starts_with("# header\n"), "{out}");
-        let t: toml::Table = toml::from_str(&out).unwrap();
-        assert!(!t.contains_key("title"));
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "# header\n\n[[window]]\ntitle = \"a\"\n"
+        );
     }
 
     #[cfg(unix)]
