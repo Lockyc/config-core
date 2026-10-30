@@ -1,6 +1,7 @@
-//! Leaf-agnostic structural edits to a config file. Each app builds its own field list (curator:
-//! `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls these; this module knows nothing
-//! about what the fields mean. Add/remove/set/move edit windows, groups and tabs (addressed by an
+//! Leaf-agnostic structural edits to a config file. Each app builds its own group/tab field list
+//! (curator: `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls these; this module knows
+//! nothing about what the fields mean. A window's shared `title`/`colour` have their own
+//! `add_window`/`edit_window`. Add/remove/set/move edit windows, groups and tabs (addressed by an
 //! `At`); `set_key` sets one root key (an app's menu toggle writing its setting). Comment/format
 //! preserving — only the addressed entry changes. Every call re-reads the file, so an external
 //! edit between two calls is never overwritten.
@@ -182,22 +183,46 @@ pub fn add_tab(
     save(path, &doc)
 }
 
-/// Append a `[[window]]` populated with `fields`. Errors `WindowExists` when its trimmed `title`
-/// is already taken.
-pub fn add_window(path: &Path, fields: &[(&str, Value)]) -> Result<(), EditError> {
+/// Append a `[[window]]` titled `title` (trimmed), with `colour` when given. Errors
+/// `WindowExists` when the title is already taken.
+pub fn add_window(path: &Path, title: &str, colour: Option<&str>) -> Result<(), EditError> {
+    let title = title.trim();
     let mut doc = load(path)?;
-    let new = table_from(fields);
-    if let Some(title) = new.get("title").and_then(Item::as_str) {
-        if window_index(&doc, title).is_ok() {
-            return Err(EditError::WindowExists(title.trim().to_string()));
-        }
+    if window_index(&doc, title).is_ok() {
+        return Err(EditError::WindowExists(title.to_string()));
     }
+    let mut fields = vec![("title", Value::from(title))];
+    fields.extend(colour.map(|c| ("colour", Value::from(c))));
+    let new = table_from(&fields);
     doc.entry("window")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
         .ok_or(EditError::Malformed("window"))?
         .push(new);
     save(path, &doc)
+}
+
+/// Change the window titled `title`: `colour` (`None` keeps it, `Some(None)` clears it), then
+/// `new_title`. The colour goes first, so it is addressed while the window still carries `title`.
+/// Nothing to change is a no-op.
+pub fn edit_window(
+    path: &Path,
+    title: &str,
+    new_title: Option<&str>,
+    colour: Option<Option<&str>>,
+) -> Result<(), EditError> {
+    let at = At {
+        window: title,
+        group: None,
+        tab: None,
+    };
+    if let Some(colour) = colour {
+        set_field(path, at, "colour", colour.map(Value::from))?;
+    }
+    if let Some(new_title) = new_title {
+        set_field(path, at, "title", Some(Value::from(new_title.trim())))?;
+    }
+    Ok(())
 }
 
 /// Append a `[[window.group]]` populated with `fields` to the named window.
@@ -490,16 +515,45 @@ mod tests {
     #[test]
     fn add_window_appends_and_refuses_a_taken_title() {
         let (_d, p) = write_tmp("# keep\n[[window]]\ntitle = \"Comms\"\n");
-        add_window(&p, &[("title", "New".into())]).unwrap();
+        add_window(&p, " New ", None).unwrap();
         let doc = parse(&p);
         assert_eq!(doc["window"].as_array_of_tables().unwrap().len(), 2);
+        assert_eq!(doc["window"][1]["title"].as_str(), Some("New"));
+        assert!(doc["window"][1].get("colour").is_none());
         assert!(std::fs::read_to_string(&p).unwrap().contains("# keep"));
-        let err = add_window(&p, &[("title", " Comms ".into())]).unwrap_err();
+        let err = add_window(&p, " Comms ", None).unwrap_err();
         assert!(matches!(err, EditError::WindowExists(_)));
         // First window into a config that has none.
         let (_d2, p2) = write_tmp("# empty\n");
-        add_window(&p2, &[("title", "One".into())]).unwrap();
+        add_window(&p2, "One", Some("#abc")).unwrap();
         assert_eq!(parse(&p2)["window"][0]["title"].as_str(), Some("One"));
+        assert_eq!(parse(&p2)["window"][0]["colour"].as_str(), Some("#abc"));
+    }
+
+    #[test]
+    fn window_writes_land_in_the_config() {
+        let (_d, p) =
+            write_tmp("# keep\n[[window]]\ntitle = \"Work\"\ncolour = \"#abc\" # accent\n");
+        add_window(&p, "Side", Some("#f00")).unwrap();
+        assert_eq!(parse(&p)["window"][1]["colour"].as_str(), Some("#f00"));
+        // Colour cleared and title changed in one edit, addressed by the old title.
+        edit_window(&p, "Work", Some("Job"), Some(None)).unwrap();
+        let doc = parse(&p);
+        assert_eq!(doc["window"][0]["title"].as_str(), Some("Job"));
+        assert!(doc["window"][0].get("colour").is_none());
+        // Colour only: the title stays.
+        edit_window(&p, "Job", None, Some(Some("#0f0"))).unwrap();
+        assert_eq!(parse(&p)["window"][0]["colour"].as_str(), Some("#0f0"));
+        assert_eq!(parse(&p)["window"][0]["title"].as_str(), Some("Job"));
+        // Nothing to change is a no-op, even for a missing window.
+        edit_window(&p, "Nope", None, None).unwrap();
+        assert!(matches!(
+            edit_window(&p, "Nope", Some("X"), None),
+            Err(EditError::WindowNotFound(_))
+        ));
+        remove(&p, at("Side", None, None)).unwrap();
+        assert_eq!(parse(&p)["window"].as_array_of_tables().unwrap().len(), 1);
+        assert!(std::fs::read_to_string(&p).unwrap().contains("# keep"));
     }
 
     #[test]
@@ -666,7 +720,7 @@ mod tests {
     #[test]
     fn non_array_window_or_group_key_is_malformed() {
         let (_d, p) = write_tmp("window = \"oops\"\n");
-        let err = add_window(&p, &[("title", "X".into())]).unwrap_err();
+        let err = add_window(&p, "X", None).unwrap_err();
         assert!(matches!(err, EditError::Malformed("window")));
         let (_d, p) = write_tmp("[[window]]\ntitle = \"W\"\ngroup = \"oops\"\n");
         let err = add_group(&p, "W", &[("name", "G".into())]).unwrap_err();

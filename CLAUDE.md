@@ -29,7 +29,7 @@ Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for 
   subcommand (`fmt_cli`) all three apps delegate to. `validate` stays per-app: it prints each
   app's own leaf schema.
 - `colour` — `Colour::parse` / `Colour::hex` for accent colours.
-- `edit` — `add_tab` plus `add_window`/`add_group`/`remove`/`set_field`/`move_tab` (addressed by `At`): comment-preserving, re-reading the file per call.
+- `edit` — `add_tab` plus `add_window`/`edit_window`/`add_group`/`remove`/`set_field`/`move_tab` (addressed by `At`): comment-preserving, re-reading the file per call.
   Consumed by curator and warden. `toml_edit` is re-exported (`config_core::toml_edit`) so a
   consumer can name the field-value type without pinning its own `toml_edit`, which would risk a
   version skew against this crate's API.

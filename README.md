@@ -28,9 +28,9 @@ config-core provides the leaf-agnostic pieces:
 - **`colour`** — `#rgb` / `#rrggbb` hex parsing for the per-window accent colour (`Colour::parse`,
   `Colour::hex`).
 - **`edit`** — leaf-agnostic structural add/remove/set/move edits of windows, groups and tabs:
-  `add_window`, `add_group`, `add_tab`, `remove`, `set_field` and `move_tab` (the last three
-  addressed by an `At`), plus `set_key` (one root key). Atomic and comment-preserving via `toml_edit`; the caller supplies an
-  ordered field list for any leaf shape. An unknown window, group or tab is an error. Field values
+  `add_window` / `edit_window` (title and colour), `add_group`, `add_tab`, `remove`, `set_field` and
+  `move_tab` (the last three addressed by an `At`), plus `set_key` (one root key). Atomic and
+  comment-preserving via `toml_edit`; groups and tabs take an ordered field list for any leaf shape. An unknown window, group or tab is an error. Field values
   are `config_core::toml_edit::Value` (`toml_edit` is re-exported; callers need no dependency of
   their own on it).
 - **`paths`** — config-path resolution (`resolve_config_path`, `default_config_path`). The
