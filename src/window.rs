@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use serde::de::{self, DeserializeOwned, MapAccess, Visitor};
+use serde::de::{self, DeserializeOwned, Error as _, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 use toml::Table;
@@ -64,17 +64,40 @@ where
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut t = Table::deserialize(deserializer)?;
+        let title: String = take(&mut t, "title")
+            .map_err(D::Error::custom)?
+            .ok_or_else(|| de::Error::missing_field("title"))?;
+        let at = |e: String| D::Error::custom(format_args!("window `{}`: {e}", title.trim()));
+        let width = take(&mut t, "width").map_err(at)?;
+        let height = take(&mut t, "height").map_err(at)?;
+        let colour = take(&mut t, "colour").map_err(at)?;
+        let open_on_start = take(&mut t, "open_on_start").map_err(at)?;
+        let groups = take_list(&mut t, "group", "name").map_err(at)?;
+        let extra = remainder(t, WINDOW_KEYS).map_err(at)?;
         Ok(Window {
-            title: take(&mut t, "title")?.ok_or_else(|| de::Error::missing_field("title"))?,
-            width: take(&mut t, "width")?.unwrap_or_else(default_window_width),
-            height: take(&mut t, "height")?.unwrap_or_else(default_window_height),
-            colour: take(&mut t, "colour")?,
-            open_on_start: take(&mut t, "open_on_start")?.unwrap_or(true),
-            groups: take(&mut t, "group")?.unwrap_or_default(),
-            extra: remainder(t)?,
+            title,
+            width: width.unwrap_or_else(default_window_width),
+            height: height.unwrap_or_else(default_window_height),
+            colour,
+            open_on_start: open_on_start.unwrap_or(true),
+            groups,
+            extra,
         })
     }
 }
+
+/// The keys [`Window`] claims before its extras see the rest.
+const WINDOW_KEYS: &[&str] = &[
+    "title",
+    "width",
+    "height",
+    "colour",
+    "open_on_start",
+    "group",
+];
+
+/// The keys [`Group`] claims before its extras see the rest.
+const GROUP_KEYS: &[&str] = &["name", "tab"];
 
 /// One `[[window.group]]`: a `name`, its `T` tabs, and the app's group extras `G`. Deserialized
 /// the same way as [`Window`], for the same reason.
@@ -93,29 +116,81 @@ where
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut t = Table::deserialize(deserializer)?;
         Ok(Group {
-            name: take(&mut t, "name")?.ok_or_else(|| de::Error::missing_field("name"))?,
-            tabs: take(&mut t, "tab")?.unwrap_or_default(),
-            extra: remainder(t)?,
+            name: take(&mut t, "name")
+                .map_err(D::Error::custom)?
+                .ok_or_else(|| de::Error::missing_field("name"))?,
+            tabs: take_list(&mut t, "tab", "title").map_err(D::Error::custom)?,
+            extra: remainder(t, GROUP_KEYS).map_err(D::Error::custom)?,
         })
     }
 }
 
-/// Removes `key` from `t` and deserializes it, prefixing any error with the key: a value
-/// deserialized out of a detached `toml::Value` has no span, so the key is the only locator.
-fn take<V: DeserializeOwned, E: de::Error>(t: &mut Table, key: &str) -> Result<Option<V>, E> {
+/// Removes `key` from `t` and deserializes it, prefixing any error with the key. A value
+/// deserialized out of a detached `toml::Value` has no span, so every error carries its locator in
+/// its message: the key here, the window title, group name or tab title around it.
+fn take<V: DeserializeOwned>(t: &mut Table, key: &str) -> Result<Option<V>, String> {
     t.remove(key)
         .map(|v| {
             v.try_into()
-                .map_err(|e: toml::de::Error| E::custom(format_args!("`{key}`: {}", e.message())))
+                .map_err(|e: toml::de::Error| format!("`{key}`: {}", e.message()))
         })
         .transpose()
 }
 
-/// Deserializes what is left of `t` after the common keys were taken.
-fn remainder<V: DeserializeOwned, E: de::Error>(t: Table) -> Result<V, E> {
+/// Removes the array `key` (`group` or `tab`) from `t` and deserializes each element, prefixing an
+/// error with the element's `named` string (``group `Chat`: ``) or else its position
+/// (`group #2: `).
+fn take_list<V: DeserializeOwned>(t: &mut Table, key: &str, named: &str) -> Result<Vec<V>, String> {
+    match t.remove(key) {
+        None => Ok(Vec::new()),
+        Some(toml::Value::Array(items)) => items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let at = match item.get(named).and_then(toml::Value::as_str) {
+                    Some(name) => format!("{key} `{}`", name.trim()),
+                    None => format!("{key} #{}", i + 1),
+                };
+                item.try_into()
+                    .map_err(|e: toml::de::Error| format!("{at}: {}", e.message()))
+            })
+            .collect(),
+        Some(other) => other
+            .try_into()
+            .map_err(|e: toml::de::Error| format!("`{key}`: {}", e.message())),
+    }
+}
+
+/// Deserializes what is left of `t` after the container's `claimed` keys were taken. An unknown
+/// key's error lists the claimed keys ahead of the ones the extras know: the extras alone would
+/// name only theirs.
+fn remainder<V: DeserializeOwned>(t: Table, claimed: &[&str]) -> Result<V, String> {
     toml::Value::Table(t)
         .try_into()
-        .map_err(|e: toml::de::Error| E::custom(e.message()))
+        .map_err(|e: toml::de::Error| with_claimed_keys(e.message(), claimed))
+}
+
+/// serde's unknown-field message (``unknown field `x`, expected one of `a`, `b` `` / `expected
+/// `a`` / `there are no fields`) with `claimed` listed first.
+fn with_claimed_keys(message: &str, claimed: &[&str]) -> String {
+    let Some((field, tail)) = message
+        .strip_prefix("unknown field `")
+        .and_then(|rest| rest.split_once('`'))
+    else {
+        return message.to_string();
+    };
+    let extras = tail
+        .strip_prefix(", expected one of ")
+        .or_else(|| tail.strip_prefix(", expected "));
+    let keys: Vec<String> = claimed
+        .iter()
+        .map(|k| format!("`{k}`"))
+        .chain(extras.map(str::to_string))
+        .collect();
+    format!(
+        "unknown field `{field}`, expected one of {}",
+        keys.join(", ")
+    )
 }
 
 /// Why a window list failed [`validate_windows`]. Titles and group names are compared and reported
@@ -176,31 +251,18 @@ pub fn validate_windows<T, X, G>(windows: &[Window<T, X, G>]) -> Result<(), Wind
     Ok(())
 }
 
-/// Carry a window's in-place title or colour change into an already-loaded `windows` ahead of the
-/// config reload that will echo it: patch the window titled `title` (a colour change), else the
-/// one window whose title `listed` no longer accepts (a rename). With several unlisted (another
-/// edit in flight) nothing is patched and the reload settles it.
+/// Carry a window's in-place change from `old` to `title` and `colour` into an already-loaded
+/// `windows` ahead of the config reload that will echo it: patch the window titled `old`, else the
+/// one already titled `title`. Titles compare trimmed; neither listed patches nothing.
 pub fn retitle_window<T, X, G>(
     windows: &mut [Window<T, X, G>],
+    old: &str,
     title: &str,
     colour: Option<String>,
-    listed: impl Fn(&str) -> bool,
 ) {
-    let title = title.trim();
-    let idx = windows
-        .iter()
-        .position(|w| w.title.trim() == title)
-        .or_else(|| {
-            let mut unlisted = windows
-                .iter()
-                .enumerate()
-                .filter(|(_, w)| !listed(&w.title))
-                .map(|(i, _)| i);
-            match (unlisted.next(), unlisted.next()) {
-                (Some(i), None) => Some(i),
-                _ => None,
-            }
-        });
+    let (old, title) = (old.trim(), title.trim());
+    let at = |t: &str| windows.iter().position(|w| w.title.trim() == t);
+    let idx = at(old).or_else(|| at(title));
     if let Some(w) = idx.map(|i| &mut windows[i]) {
         w.title = title.to_string();
         w.colour = colour;
@@ -251,23 +313,74 @@ mod tests {
             "[[window]]\ntitle = \"Docs\"\n[[window]]\ntitle = \"Side\"\ncolour = \"#abc\"\n",
         )
         .unwrap();
-        // "Docs" was renamed to "Notes": "Docs" is the one window no longer listed.
-        let listed = |t: &str| ["Notes", "Side"].contains(&t.trim());
-        retitle_window(&mut c.windows, "Notes", None, listed);
+        retitle_window(&mut c.windows, " Docs ", "Notes", None);
         assert_eq!(c.windows[0].title, "Notes");
-        // A colour change (or a reload's echo) patches the window by its own title.
-        retitle_window(&mut c.windows, " Side ", Some("#f00".into()), listed);
+        // A colour change patches the window by its own title.
+        retitle_window(&mut c.windows, "Side", " Side ", Some("#f00".into()));
         assert_eq!(c.windows[1].colour.as_deref(), Some("#f00"));
         assert_eq!(c.windows[1].title, "Side");
-        // Two unlisted windows (another edit in flight): which was renamed is unknown, so nothing
-        // is patched.
-        retitle_window(&mut c.windows, "Other", None, |t| t.trim() == "Other");
+        // The reload already carried the rename: the window under its new title is patched.
+        retitle_window(&mut c.windows, "Docs", "Notes", Some("#0f0".into()));
+        assert_eq!(c.windows[0].colour.as_deref(), Some("#0f0"));
+        // Neither title listed: nothing is patched.
+        retitle_window(&mut c.windows, "Gone", "Other", None);
         assert_eq!(
             c.windows
                 .iter()
                 .map(|w| w.title.as_str())
                 .collect::<Vec<_>>(),
             ["Notes", "Side"]
+        );
+    }
+
+    #[test]
+    fn errors_name_the_window_and_list_every_window_key() {
+        let err = |second: &str| {
+            let src = format!("[[window]]\ntitle = \"A\"\n[[window]]\ntitle = \"B\"\n{second}");
+            parse::<WinExtras, GroupExtras>(&src)
+                .unwrap_err()
+                .to_string()
+        };
+        let e = err("color = \"#abc\"\n");
+        assert!(e.contains("window `B`: unknown field `color`"), "{e}");
+        for key in [
+            "title",
+            "width",
+            "height",
+            "colour",
+            "open_on_start",
+            "group",
+            "session",
+        ] {
+            assert!(e.contains(&format!("`{key}`")), "{key} missing from {e}");
+        }
+        let e = err("width = \"wide\"\n");
+        assert!(e.contains("window `B`: `width`"), "{e}");
+        let e = err("[[window.group]]\nname = \"G\"\nbogus = 1\n");
+        assert!(
+            e.contains("window `B`: group `G`: unknown field `bogus`"),
+            "{e}"
+        );
+        assert!(e.contains("`name`") && e.contains("`url`"), "{e}");
+        let e = err("[[window.group]]\nname = \"G\"\n[[window.group.tab]]\ntitle = \"t\"\nx = 1\n");
+        assert!(
+            e.contains("window `B`: group `G`: tab `t`: unknown field `x`"),
+            "{e}"
+        );
+        let e = err("[[window.group]]\nname = \"G\"\n[[window.group.tab]]\nx = 1\n");
+        assert!(e.contains("window `B`: group `G`: tab #1:"), "{e}");
+        let e = err("[[window.group]]\nurl = \"u\"\n");
+        assert!(
+            e.contains("window `B`: group #1: missing field `name`"),
+            "{e}"
+        );
+        // No extras: every shared key, and the stray one.
+        let e = parse::<NoExtras, NoExtras>("[[window]]\ntitle = \"A\"\ncolor = 1\n")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("window `A`: unknown field `color`, expected one of `title`"),
+            "{e}"
         );
     }
 

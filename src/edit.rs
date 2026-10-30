@@ -25,6 +25,8 @@ pub enum EditError {
     TabNotFound(String),
     #[error("a window titled {0:?} already exists")]
     WindowExists(String),
+    #[error("{0}")]
+    BadColour(#[from] crate::ColourError),
     #[error("config has a `{0}` entry that is not an array of tables")]
     Malformed(&'static str),
 }
@@ -280,9 +282,11 @@ pub fn add_tab(
 }
 
 /// Append a `[[window]]` titled `title` (trimmed), with `colour` when given. Errors
-/// `WindowExists` when the title is already taken.
+/// `WindowExists` when the title is already taken, `BadColour` for a colour
+/// [`Colour::parse`](crate::Colour::parse) refuses.
 pub fn add_window(path: &Path, title: &str, colour: Option<&str>) -> Result<(), EditError> {
     let title = title.trim();
+    colour.map(crate::Colour::parse).transpose()?;
     let mut doc = load(path)?;
     if window_index(&doc, title).is_ok() {
         return Err(EditError::WindowExists(title.to_string()));
@@ -299,8 +303,9 @@ pub fn add_window(path: &Path, title: &str, colour: Option<&str>) -> Result<(), 
 }
 
 /// Change the window titled `title`: `colour` (`None` keeps it, `Some(None)` clears it), then
-/// `new_title`. The colour goes first, so it is addressed while the window still carries `title`.
-/// Nothing to change is a no-op.
+/// `new_title`, in one write. The colour goes first, so it is addressed while the window still
+/// carries `title`. Nothing to change is a no-op. Errors as [`add_window`] does for a `new_title`
+/// another window holds or a bad colour.
 pub fn edit_window(
     path: &Path,
     title: &str,
@@ -315,7 +320,13 @@ pub fn edit_window(
     if colour.is_none() && new_title.is_none() {
         return Ok(());
     }
+    colour.flatten().map(crate::Colour::parse).transpose()?;
     let mut doc = load(path)?;
+    if let Some(new) = new_title.map(str::trim) {
+        if window_index(&doc, new).is_ok_and(|i| window_index(&doc, title).ok() != Some(i)) {
+            return Err(EditError::WindowExists(new.to_string()));
+        }
+    }
     if let Some(colour) = colour {
         apply_field(&mut doc, at, "colour", colour.map(Value::from))?;
     }
@@ -472,7 +483,7 @@ mod tests {
     #[test]
     fn remove_key_drops_a_root_key_and_its_own_comment_but_keeps_the_header() {
         let (_d, p) = write_tmp(
-            "# header\n\n# The window's name.\ntitle = \"Rotary\"\n\n# Its accent.\ncolour = \"#17458f\"\n\n\
+            "# header\n\n# The window's name.\ntitle = \"Club\"\n\n# Its accent.\ncolour = \"#2a6f4e\"\n\n\
              # Sizing.\ndensity = \"compact\"\n\n[[window]]\ntitle = \"a\"\n",
         );
         assert!(remove_key(&p, "title").unwrap());
@@ -748,6 +759,27 @@ mod tests {
         assert_eq!(doc["window"][0]["colour"].as_str(), Some("#0f0"));
         edit_window(&p, "Job", None, None).unwrap();
         assert_eq!(SAVES.with(|n| n.get()) - before, 1);
+    }
+
+    #[test]
+    fn window_writes_refuse_a_taken_title_and_a_bad_colour() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"Work\"\n[[window]]\ntitle = \"Job\"\n");
+        let before = std::fs::read_to_string(&p).unwrap();
+        assert!(matches!(
+            edit_window(&p, "Work", Some(" Job "), None),
+            Err(EditError::WindowExists(t)) if t == "Job"
+        ));
+        assert!(matches!(
+            edit_window(&p, "Work", None, Some(Some("red"))),
+            Err(EditError::BadColour(_))
+        ));
+        assert!(matches!(
+            add_window(&p, "New", Some("#ggg")),
+            Err(EditError::BadColour(_))
+        ));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), before);
+        // Its own title, differently spaced, is not taken.
+        edit_window(&p, "Work", Some(" Work "), None).unwrap();
     }
 
     #[test]

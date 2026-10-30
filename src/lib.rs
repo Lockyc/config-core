@@ -1,27 +1,29 @@
-//! Domain-free TOML config primitives shared by the curator, warden, and lector apps.
+//! Domain-free TOML config primitives shared by the curator, warden, lector, and flotilla apps.
 //!
-//! All three share the same window → group → tab config *shape* and the same need to keep the
+//! All four share the same window → group → tab config *shape* and the same need to keep the
 //! file tidy. This crate carries the parts that need no knowledge of any app's leaf: the
 //! window/group container ([`window`] — [`Window`], [`Group`], [`NoExtras`]), the leaf-free model
 //! primitives ([`model`] — [`Density`], [`TabDigitKeys`], [`Warning`], and the shared serde field
 //! defaults), the house-style formatter ([`fmt`]), hex colour parsing ([`colour`]), structural
 //! config edits ([`edit`]), config-path resolution ([`paths`]), and starter-config seeding
 //! ([`seed`]). Each app supplies its own leaf tab and window/group extras (curator's
-//! `url`/`session`, warden's `dir`/`shell`/`probe`, lector's `dir`).
+//! `url`/`session`, warden's `dir`/`shell`/`probe`, lector's `dir`, flotilla's `url`).
 //!
 //! # Modules
 //!
 //! - [`window`] — [`Window<T, X, G>`] and [`Group<T, G>`]: the common window and group keys, each
 //!   app's leaf `T`, and its extras `X`/`G`, which receive every key the container doesn't claim.
-//!   [`validate_windows`] checks the shared keys.
+//!   [`validate_windows`] checks the shared keys; [`retitle_window`] carries an in-place rename.
 //! - [`fmt`] — house-style TOML formatter (`format_str`, `format_file`). Atomic, diff-guarded,
-//!   watcher-loop safe. [`fmt_cli`] is the shared `fmt` CLI subcommand all three apps delegate to
+//!   watcher-loop safe. [`fmt_cli`] is the shared `fmt` CLI subcommand curator, warden and lector
+//!   delegate to
 //!   (the `validate` subcommand stays per-app — it prints each app's own leaf schema).
 //! - [`colour`] — `#rgb`/`#rrggbb` hex accent-colour parsing ([`Colour`], [`ColourError`]).
 //! - [`edit`] — leaf-agnostic structural add/remove/set/move edits of windows, groups and tabs
-//!   ([`add_window`], [`add_group`], [`add_tab`], [`remove`], [`set_field`], [`move_tab`], the last
-//!   three addressed by [`At`]), atomic and comment-preserving via `toml_edit`. The caller supplies
-//!   the fields; this module knows nothing about what they mean.
+//!   ([`add_window`], [`edit_window`], [`add_group`], [`add_tab`], [`remove`], [`set_field`],
+//!   [`move_tab`], the last three addressed by [`At`]) and of one root key ([`set_key`],
+//!   [`remove_key`], [`toggle_tab_digit_keys`]), atomic and comment-preserving via `toml_edit`. The
+//!   caller supplies the fields; this module knows nothing about what they mean.
 //! - [`paths`] — where an app's config file lives. [`resolve_config_path`] checks the app's env
 //!   override (set and non-empty) before falling back to [`default_config_path`]
 //!   (`~/.config/<app_dir>/config.toml`).
@@ -43,7 +45,7 @@ pub mod window;
 
 pub use colour::{Colour, ColourError};
 pub use edit::{
-    add_group, add_tab, add_window, move_tab, remove, remove_key, set_field, set_key,
+    add_group, add_tab, add_window, edit_window, move_tab, remove, remove_key, set_field, set_key,
     toggle_tab_digit_keys, At, EditError,
 };
 pub use fmt::{fmt_cli, format_file, format_str};
