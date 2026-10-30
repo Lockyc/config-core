@@ -1,7 +1,9 @@
 //! Leaf-agnostic structural edits to a config file. Each app builds its own field list (curator:
 //! `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls these; this module knows nothing
-//! about what the fields mean. Comment/format preserving — only the addressed table changes. Every
-//! call re-reads the file, so an external edit between two calls is never overwritten.
+//! about what the fields mean. Add/remove/set/move edit windows, groups and tabs (addressed by an
+//! `At`); `set_key` sets one root key (an app's menu toggle writing its setting). Comment/format
+//! preserving — only the addressed entry changes. Every call re-reads the file, so an external
+//! edit between two calls is never overwritten.
 
 use crate::io::atomic_write;
 use std::path::Path;
@@ -119,6 +121,50 @@ fn load(path: &Path) -> Result<DocumentMut, EditError> {
 fn save(path: &Path, doc: &DocumentMut) -> Result<(), EditError> {
     atomic_write(path, &doc.to_string())?;
     Ok(())
+}
+
+/// Set root-table `key` to `v`, replacing its value or adding it above the first table. Atomic +
+/// comment-preserving. A missing file is an `Io` error: the app seeds its starter config first, so
+/// the starter's documentation is never replaced by a one-key file.
+pub fn set_key(path: &Path, key: &str, v: Value) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    match doc.get_mut(key).and_then(Item::as_value_mut) {
+        // Keeps the entry's own decor (a trailing `# why` comment) by swapping only the value.
+        Some(old) => {
+            let decor = old.decor().clone();
+            *old = v;
+            *old.decor_mut() = decor;
+        }
+        None => {
+            let first_key = !doc.iter().any(|(_, item)| item.is_value());
+            doc.insert(key, value(v));
+            // The file's header comment hangs on the first table while the root has no keys; it
+            // moves onto the new key so it stays the file's header.
+            if first_key {
+                if let Some(header) = take_first_table_prefix(&mut doc) {
+                    if let Some(mut k) = doc.key_mut(key) {
+                        k.leaf_decor_mut().set_prefix(header);
+                    }
+                }
+            }
+        }
+    }
+    save(path, &doc)
+}
+
+/// Takes the first table's leading comment, leaving one blank line in its place.
+fn take_first_table_prefix(doc: &mut DocumentMut) -> Option<String> {
+    let decor = doc.iter_mut().find_map(|(_, item)| match item {
+        Item::Table(t) => Some(t.decor_mut()),
+        Item::ArrayOfTables(a) => a.get_mut(0).map(|t| t.decor_mut()),
+        _ => None,
+    })?;
+    let header = decor.prefix()?.as_str()?.to_string();
+    if header.trim().is_empty() {
+        return None;
+    }
+    decor.set_prefix("\n");
+    Some(header)
 }
 
 /// Append a `[[window.tab]]` (group `None`) or `[[window.group.tab]]` (group `Some(name)`) table
@@ -274,6 +320,49 @@ mod tests {
         let mut f = std::fs::File::create(&p).unwrap();
         f.write_all(body.as_bytes()).unwrap();
         (dir, p)
+    }
+
+    #[test]
+    fn set_key_replaces_a_root_key_keeping_comments() {
+        let (_d, p) =
+            write_tmp("# c\ntab_digit_keys = \"jump\" # why\n\n[[window]]\ntitle = \"a\"\n");
+        set_key(&p, "tab_digit_keys", "cycle".into()).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.starts_with("# c\n"), "{out}");
+        assert!(out.contains("tab_digit_keys = \"cycle\""), "{out}");
+        assert!(out.contains("[[window]]\ntitle = \"a\""), "{out}");
+    }
+
+    #[test]
+    fn set_key_adds_a_missing_key_above_the_tables() {
+        let (_d, p) = write_tmp("title = \"x\"\n\n[[window]]\ntitle = \"a\"\n");
+        set_key(&p, "tab_digit_keys", "cycle".into()).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        let key = out.find("tab_digit_keys").expect("key written");
+        assert!(key < out.find("[[window]]").unwrap(), "{out}");
+        let t: toml::Table = toml::from_str(&out).unwrap();
+        assert_eq!(t["tab_digit_keys"].as_str(), Some("cycle"));
+    }
+
+    #[test]
+    fn set_key_keeps_a_header_comment_above_a_new_first_key() {
+        // With no root keys, toml_edit hangs the file's header comment on the first table.
+        let (_d, p) = write_tmp("# header\n\n[[window]]\ntitle = \"a\"\n");
+        set_key(&p, "tab_digit_keys", "cycle".into()).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            out,
+            "# header\n\ntab_digit_keys = \"cycle\"\n\n[[window]]\ntitle = \"a\"\n"
+        );
+    }
+
+    #[test]
+    fn set_key_on_a_missing_file_is_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        match set_key(&dir.path().join("none.toml"), "k", true.into()) {
+            Err(EditError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

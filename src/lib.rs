@@ -42,7 +42,9 @@ pub mod seed;
 pub mod window;
 
 pub use colour::{Colour, ColourError};
-pub use edit::{add_group, add_tab, add_window, move_tab, remove, set_field, At, EditError};
+pub use edit::{
+    add_group, add_tab, add_window, move_tab, remove, set_field, set_key, At, EditError,
+};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use model::{
     default_true, default_window_height, default_window_width, Density, TabDigitKeys, Warning,

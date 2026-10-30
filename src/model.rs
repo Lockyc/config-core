@@ -44,10 +44,8 @@ impl Density {
 ///   chords deliberately removes the digit-1/2 *jumps*, so direct jumps start at ⌘3.
 ///
 /// Deserializes from / serializes to the lowercase token the config file uses (`jump` / `cycle`);
-/// an unrecognised value is a parse error. [`TabDigitKeys::as_str`] mirrors [`Density::as_str`] —
-/// the same token, for a hand-built model or a formatter that doesn't go through serde — but
-/// unlike `Density::as_str` (used by warden's chrome DTO) it has no consumer yet: warden's
-/// `resolve_tab_digit_keys` matches the config string literals directly, and `tab_digit_keys`
+/// an unrecognised value is a parse error. [`TabDigitKeys::as_str`] is that token for the apps'
+/// Cycle Tabs menu toggle, which writes it back with [`crate::set_key`]. `tab_digit_keys`
 /// deliberately never reaches the chrome DTO the way density does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -71,6 +69,14 @@ impl TabDigitKeys {
     /// independent), so the consuming app passes this rather than the enum itself.
     pub fn is_cycle(self) -> bool {
         matches!(self, TabDigitKeys::Cycle)
+    }
+
+    /// The other mode — what the apps' Cycle Tabs menu toggle writes.
+    pub fn toggled(self) -> Self {
+        match self {
+            TabDigitKeys::Jump => TabDigitKeys::Cycle,
+            TabDigitKeys::Cycle => TabDigitKeys::Jump,
+        }
     }
 }
 
@@ -132,6 +138,8 @@ mod tests {
         // `is_cycle` is the bridge the apps hand to shell-core's menu builder.
         assert!(!TabDigitKeys::Jump.is_cycle());
         assert!(TabDigitKeys::Cycle.is_cycle());
+        assert_eq!(TabDigitKeys::Jump.toggled(), TabDigitKeys::Cycle);
+        assert_eq!(TabDigitKeys::Cycle.toggled(), TabDigitKeys::Jump);
         // Deserializes from the lowercase token…
         let k: TabDigitKeys = toml::from_str("k = \"cycle\"\n")
             .map(|w: WrapK| w.k)

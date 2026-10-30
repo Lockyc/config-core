@@ -29,7 +29,7 @@ config-core provides the leaf-agnostic pieces:
   `Colour::hex`).
 - **`edit`** — leaf-agnostic structural add/remove/set/move edits of windows, groups and tabs:
   `add_window`, `add_group`, `add_tab`, `remove`, `set_field` and `move_tab` (the last three
-  addressed by an `At`). Atomic and comment-preserving via `toml_edit`; the caller supplies an
+  addressed by an `At`), plus `set_key` (one root key). Atomic and comment-preserving via `toml_edit`; the caller supplies an
   ordered field list for any leaf shape. An unknown window, group or tab is an error. Field values
   are `config_core::toml_edit::Value` (`toml_edit` is re-exported; callers need no dependency of
   their own on it).
