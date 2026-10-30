@@ -176,6 +176,37 @@ pub fn validate_windows<T, X, G>(windows: &[Window<T, X, G>]) -> Result<(), Wind
     Ok(())
 }
 
+/// Carry a window's in-place title or colour change into an already-loaded `windows` ahead of the
+/// config reload that will echo it: patch the window titled `title` (a colour change), else the
+/// one window whose title `listed` no longer accepts (a rename). With several unlisted (another
+/// edit in flight) nothing is patched and the reload settles it.
+pub fn retitle_window<T, X, G>(
+    windows: &mut [Window<T, X, G>],
+    title: &str,
+    colour: Option<String>,
+    listed: impl Fn(&str) -> bool,
+) {
+    let title = title.trim();
+    let idx = windows
+        .iter()
+        .position(|w| w.title.trim() == title)
+        .or_else(|| {
+            let mut unlisted = windows
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| !listed(&w.title))
+                .map(|(i, _)| i);
+            match (unlisted.next(), unlisted.next()) {
+                (Some(i), None) => Some(i),
+                _ => None,
+            }
+        });
+    if let Some(w) = idx.map(|i| &mut windows[i]) {
+        w.title = title.to_string();
+        w.colour = colour;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +243,32 @@ mod tests {
         G: serde::de::DeserializeOwned,
     {
         toml::from_str(src)
+    }
+
+    #[test]
+    fn retitle_window_patches_the_renamed_or_recoloured_window() {
+        let mut c: Config = parse(
+            "[[window]]\ntitle = \"Docs\"\n[[window]]\ntitle = \"Side\"\ncolour = \"#abc\"\n",
+        )
+        .unwrap();
+        // "Docs" was renamed to "Notes": "Docs" is the one window no longer listed.
+        let listed = |t: &str| ["Notes", "Side"].contains(&t.trim());
+        retitle_window(&mut c.windows, "Notes", None, listed);
+        assert_eq!(c.windows[0].title, "Notes");
+        // A colour change (or a reload's echo) patches the window by its own title.
+        retitle_window(&mut c.windows, " Side ", Some("#f00".into()), listed);
+        assert_eq!(c.windows[1].colour.as_deref(), Some("#f00"));
+        assert_eq!(c.windows[1].title, "Side");
+        // Two unlisted windows (another edit in flight): which was renamed is unknown, so nothing
+        // is patched.
+        retitle_window(&mut c.windows, "Other", None, |t| t.trim() == "Other");
+        assert_eq!(
+            c.windows
+                .iter()
+                .map(|w| w.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Notes", "Side"]
+        );
     }
 
     #[test]

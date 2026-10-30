@@ -55,7 +55,7 @@ pub use roots::{
     DiscoveredProject, RootDir, RootError, DEFAULT_ROOT_DEPTH,
 };
 pub use seed::{write_default_config, SeedError};
-pub use window::{validate_windows, Group, NoExtras, Window, WindowError};
+pub use window::{retitle_window, validate_windows, Group, NoExtras, Window, WindowError};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes
 // (`config_core::toml_edit::Value`) without declaring their own `toml_edit` dependency — which
