@@ -121,6 +121,8 @@ fn load(path: &Path) -> Result<DocumentMut, EditError> {
 }
 
 fn save(path: &Path, doc: &DocumentMut) -> Result<(), EditError> {
+    #[cfg(test)]
+    tests::SAVES.with(|n| n.set(n.get() + 1));
     atomic_write(path, &doc.to_string())?;
     Ok(())
 }
@@ -242,13 +244,17 @@ pub fn edit_window(
         group: None,
         tab: None,
     };
+    if colour.is_none() && new_title.is_none() {
+        return Ok(());
+    }
+    let mut doc = load(path)?;
     if let Some(colour) = colour {
-        set_field(path, at, "colour", colour.map(Value::from))?;
+        apply_field(&mut doc, at, "colour", colour.map(Value::from))?;
     }
     if let Some(new_title) = new_title {
-        set_field(path, at, "title", Some(Value::from(new_title.trim())))?;
+        apply_field(&mut doc, at, "title", Some(Value::from(new_title.trim())))?;
     }
-    Ok(())
+    save(path, &doc)
 }
 
 /// Append a `[[window.group]]` populated with `fields` to the named window.
@@ -301,17 +307,28 @@ pub fn remove(path: &Path, at: At) -> Result<(), EditError> {
 /// value keeps its surrounding whitespace and inline comment. Setting a window's `title` renames it.
 pub fn set_field(path: &Path, at: At, key: &str, new: Option<Value>) -> Result<(), EditError> {
     let mut doc = load(path)?;
+    apply_field(&mut doc, at, key, new)?;
+    save(path, &doc)
+}
+
+/// `set_field`'s change on an already-loaded document, so several fields can share one write.
+fn apply_field(
+    doc: &mut DocumentMut,
+    at: At,
+    key: &str,
+    new: Option<Value>,
+) -> Result<(), EditError> {
     let target: &mut Table = match (at.group, at.tab) {
         (g, Some((k, v))) => {
-            let owner = tab_owner_mut(&mut doc, at.window, g)?;
+            let owner = tab_owner_mut(doc, at.window, g)?;
             let i = tab_index(owner, k, v)?;
             owner["tab"]
                 .as_array_of_tables_mut()
                 .and_then(|a| a.get_mut(i))
                 .expect("checked")
         }
-        (Some(g), None) => group_mut(window_mut(&mut doc, at.window)?, g)?,
-        (None, None) => window_mut(&mut doc, at.window)?,
+        (Some(g), None) => group_mut(window_mut(doc, at.window)?, g)?,
+        (None, None) => window_mut(doc, at.window)?,
     };
     match new {
         None => {
@@ -324,7 +341,7 @@ pub fn set_field(path: &Path, at: At, key: &str, new: Option<Value>) -> Result<(
             target.insert(key, Item::Value(v));
         }
     }
-    save(path, &doc)
+    Ok(())
 }
 
 /// Move the tab addressed by `from` to the end of the named window's group `to_group` (`None`: the
@@ -603,6 +620,23 @@ mod tests {
         add_window(&p2, "One", Some("#abc")).unwrap();
         assert_eq!(parse(&p2)["window"][0]["title"].as_str(), Some("One"));
         assert_eq!(parse(&p2)["window"][0]["colour"].as_str(), Some("#abc"));
+    }
+
+    thread_local! {
+        pub(super) static SAVES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn edit_window_writes_the_file_once() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"Work\"\ncolour = \"#abc\"\n");
+        let before = SAVES.with(|n| n.get());
+        edit_window(&p, "Work", Some("Job"), Some(Some("#0f0"))).unwrap();
+        assert_eq!(SAVES.with(|n| n.get()) - before, 1);
+        let doc = parse(&p);
+        assert_eq!(doc["window"][0]["title"].as_str(), Some("Job"));
+        assert_eq!(doc["window"][0]["colour"].as_str(), Some("#0f0"));
+        edit_window(&p, "Job", None, None).unwrap();
+        assert_eq!(SAVES.with(|n| n.get()) - before, 1);
     }
 
     #[test]
