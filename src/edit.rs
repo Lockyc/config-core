@@ -2,7 +2,7 @@
 //! (curator: `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls these; this module knows
 //! nothing about what the fields mean. A window's shared `title`/`colour` have their own
 //! `add_window`/`edit_window`. Add/remove/set/move edit windows, groups and tabs (addressed by an
-//! `At`); `set_key` sets one root key; `toggle_tab_digit_keys` is the apps' Cycle Tabs menu toggle.
+//! `At`); `set_key` / `remove_key` set or remove one root key; `toggle_tab_digit_keys` is the apps' Cycle Tabs menu toggle.
 //! Comment/format preserving — only the addressed entry changes. Every call re-reads the file, so
 //! an external edit between two calls is never overwritten.
 
@@ -125,6 +125,73 @@ fn save(path: &Path, doc: &DocumentMut) -> Result<(), EditError> {
     tests::SAVES.with(|n| n.set(n.get() + 1));
     atomic_write(path, &doc.to_string())?;
     Ok(())
+}
+
+/// Remove root-table `key`; whether it was there. Atomic + comment-preserving: the comment directly
+/// above the key goes with it, but a block set off from it by a blank line — the file's header, when
+/// `key` comes first — stays, above whatever comes first after it.
+pub fn remove_key(path: &Path, key: &str) -> Result<bool, EditError> {
+    let mut doc = load(path)?;
+    let first = doc.iter().next().is_some_and(|(k, _)| k == key);
+    let prefix = doc
+        .as_table()
+        .key(key)
+        .and_then(|k| k.leaf_decor().prefix())
+        .and_then(|p| p.as_str())
+        .map(str::to_string);
+    if doc.remove(key).is_none() {
+        return Ok(false);
+    }
+    let header = prefix
+        .as_deref()
+        .filter(|_| first)
+        .and_then(|p| p.rfind("\n\n").map(|i| &p[..i + 2]))
+        .filter(|h| !h.trim().is_empty());
+    if let Some(header) = header {
+        prepend_to_first(&mut doc, header);
+    }
+    save(path, &doc)?;
+    Ok(true)
+}
+
+/// Puts `text` (comment lines) in front of whatever `doc` now starts with: a root key, or the
+/// first table.
+fn prepend_to_first(doc: &mut DocumentMut, text: &str) {
+    let Some((mut key, item)) = doc.as_table_mut().iter_mut().next() else {
+        let trailing = doc.trailing().as_str().unwrap_or("").to_string();
+        doc.set_trailing(format!("{text}{trailing}"));
+        return;
+    };
+    let joined = |own: Option<&str>| format!("{text}{}", own.unwrap_or(""));
+    match item {
+        Item::Value(_) => {
+            let own = key
+                .leaf_decor()
+                .prefix()
+                .and_then(|p| p.as_str())
+                .map(str::to_string);
+            key.leaf_decor_mut().set_prefix(joined(own.as_deref()));
+        }
+        Item::Table(t) => {
+            let own = t
+                .decor()
+                .prefix()
+                .and_then(|p| p.as_str())
+                .map(str::to_string);
+            t.decor_mut().set_prefix(joined(own.as_deref()));
+        }
+        Item::ArrayOfTables(a) => {
+            if let Some(t) = a.get_mut(0) {
+                let own = t
+                    .decor()
+                    .prefix()
+                    .and_then(|p| p.as_str())
+                    .map(str::to_string);
+                t.decor_mut().set_prefix(joined(own.as_deref()));
+            }
+        }
+        Item::None => {}
+    }
 }
 
 /// Set root-table `key` to `v`, replacing its value or adding it above the first table. Atomic +
@@ -399,6 +466,55 @@ mod tests {
         assert!(out.starts_with("# c\n"), "{out}");
         assert!(out.contains("tab_digit_keys = \"cycle\""), "{out}");
         assert!(out.contains("[[window]]\ntitle = \"a\""), "{out}");
+    }
+
+    #[test]
+    fn remove_key_drops_a_root_key_and_its_own_comment_but_keeps_the_header() {
+        let (_d, p) = write_tmp(
+            "# header\n\n# The window's name.\ntitle = \"Rotary\"\n\n# Its accent.\ncolour = \"#17458f\"\n\n\
+             # Sizing.\ndensity = \"compact\"\n\n[[window]]\ntitle = \"a\"\n",
+        );
+        assert!(remove_key(&p, "title").unwrap());
+        assert!(remove_key(&p, "colour").unwrap());
+        assert!(!remove_key(&p, "colour").unwrap(), "already gone");
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.starts_with("# header\n"), "{out}");
+        assert!(
+            !out.contains("window's name") && !out.contains("accent"),
+            "{out}"
+        );
+        assert!(out.contains("# Sizing.\ndensity = \"compact\""), "{out}");
+        let t: toml::Table = toml::from_str(&out).unwrap();
+        assert!(!t.contains_key("title") && !t.contains_key("colour"));
+        assert_eq!(t["window"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn remove_key_keeps_the_header_when_only_tables_follow() {
+        let (_d, p) = write_tmp("# header\n\ntitle = \"x\"\n\n[[window]]\ntitle = \"a\"\n");
+        assert!(remove_key(&p, "title").unwrap());
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.starts_with("# header\n"), "{out}");
+        let t: toml::Table = toml::from_str(&out).unwrap();
+        assert!(!t.contains_key("title"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_key_keeps_the_file_mode_and_a_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let (d, real) = write_tmp("a = 1\nb = 2\n");
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = d.path().join("link.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(remove_key(&link, "a").unwrap());
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read_to_string(&real).unwrap().trim(), "b = 2");
     }
 
     #[test]

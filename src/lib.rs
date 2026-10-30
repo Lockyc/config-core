@@ -43,8 +43,8 @@ pub mod window;
 
 pub use colour::{Colour, ColourError};
 pub use edit::{
-    add_group, add_tab, add_window, move_tab, remove, set_field, set_key, toggle_tab_digit_keys,
-    At, EditError,
+    add_group, add_tab, add_window, move_tab, remove, remove_key, set_field, set_key,
+    toggle_tab_digit_keys, At, EditError,
 };
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use model::{
