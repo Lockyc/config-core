@@ -17,10 +17,12 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Seven modules, all leaf-agnostic. Each module's docblocks carry the reasons for its behaviour.
+Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for its behaviour.
 
-- `model` — leaf-free model primitives (`Density`, `TabDigitKeys`, `Warning`, the logic-free
-  `Group<T>`, shared serde defaults). All three apps re-export them.
+- `model` — leaf-free model primitives (`Density`, `TabDigitKeys`, `Warning`, shared serde
+  defaults). All three apps re-export them.
+- `window` — the `Window<T, X, G>` / `Group<T, G>` container, generic over each app's leaf `T` and
+  extras `X`/`G` (`NoExtras` when an app has none).
 - `roots` — project-tree discovery (`scan_root`, `resolve_root_dir`, `discover_projects`,
   `tree_path`). Consumed by warden and lector.
 - `fmt` — the house TOML formatter (`format_str`, `format_file`) and the shared `fmt` CLI
@@ -42,25 +44,20 @@ test as everything else here: identical and leaf-free in all three apps.
 `io::atomic_write` and `io::atomic_create` are deliberately two functions; see `io.rs` and
 `atomic_write_still_refuses_a_nonexistent_target`.
 
-**Do not** grow this into a generic config framework or genericize a window/group/tab model over a
-leaf **trait**. The apps' leaves diverge (curator: `url`/`session`; warden: `dir`/`shell`/`probe`;
-lector: `dir`, a local doc-repo path) *and their divergence is multi-level* — each app also decorates
-`Config` and `WindowConfig` (curator's `session`/`allow_insecure`, lector's `theme`/`roots`, warden's
-`probe_interval`/`tab_digit_keys`), so each app owns its own model, validation, and cascade
-resolution. Only add a primitive here when it is **leaf-free** (no app's tab-leaf type appears in its
-signature) and shared by **two or more** apps. `roots` is one precedent
-(`scan_root`/`RootDir`/`discover_projects` — consumed by warden + lector but not curator, so
-leaf-freeness, not "all three", is the gate); `model` is the other (`Density`/`Warning` across all
-three, `Group<T>`/`default_*` across curator + lector). No core→core edges: shell-core's menu takes
-a bool for `TabDigitKeys` rather than depending on this crate.
+**config-core owns the window → group → tab container** — `Window<T, X, G>` and `Group<T, G>`
+(`window`) — and window-level validation; **each app owns its leaf `T` and its extras `X`/`G`**
+(curator's `url`/`session`, warden's `dir`/`shell`/`probe`, lector's `dir`; per-window and per-group
+decorations such as a window `session` or a group `url`). The container holds the common keys and
+hands every other key to the app's extras, which `deny_unknown_fields`, so an unknown key is still
+reported by name. Leaf meaning stays in the app.
 
-The gate is **leaf-freeness**, and a *logic-free* generic container passes it: `Group<T>` is a `name`
-plus `Vec<T>` — it names each app's leaf generically but touches no leaf meaning, so it belongs here.
-What stays forbidden is genericizing the *model* over a leaf **trait** (a `Tab: TabLike` the
-window/group machinery dispatches through) — that would smuggle leaf logic behind a type param and is
-the abstraction this crate exists to avoid. Rule of thumb: a container that only *holds* leaves is
-fine; a trait the model *calls into* is not. `fmt`'s "tab" leaf detection keys on the literal `tab`
-table name, which all three apps use (`[[window.tab]]`, `[[window.group.tab]]`).
+Otherwise, add a primitive here only when it is **leaf-free** (no app's tab-leaf *meaning* appears in
+it; holding `T` generically is fine) and shared by **two or more** apps. `roots`
+(`scan_root`/`RootDir`/`discover_projects` — warden + lector, not curator) shows that leaf-freeness,
+not "all three", is the gate. Don't grow this into a generic config framework. No core→core edges:
+shell-core's menu takes a bool for `TabDigitKeys` rather than depending on this crate. `fmt`'s "tab"
+leaf detection keys on the literal `tab` table name, which every app uses (`[[window.tab]]`,
+`[[window.group.tab]]`).
 
 ## Consumed as a git dependency
 

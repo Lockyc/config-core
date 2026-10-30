@@ -1,18 +1,18 @@
 //! Domain-free TOML config primitives shared by the curator, warden, and lector apps.
 //!
 //! All three share the same window → group → tab config *shape* and the same need to keep the
-//! file tidy, and their divergence is multi-level (each app decorates `Config`, `WindowConfig`,
-//! and the leaf `Tab` — curator's `url`/`session`, warden's `dir`/`shell`/`probe`, lector's
-//! `dir`). This crate carries the parts that need no knowledge of any app's leaf: the leaf-free
-//! model primitives ([`model`] — [`Density`], [`TabDigitKeys`], [`Warning`], the logic-free
-//! [`Group<T>`] container, and the shared serde field defaults), the house-style formatter
-//! ([`fmt`]), hex colour parsing ([`colour`]), structural config edits ([`edit`]), config-path
-//! resolution ([`paths`]), and starter-config seeding ([`seed`]). Each app keeps its own leaf
-//! type, validation, and cascade resolution and layers them on these, so there's no leaf
-//! abstraction to fight.
+//! file tidy. This crate carries the parts that need no knowledge of any app's leaf: the
+//! window/group container ([`window`] — [`Window`], [`Group`], [`NoExtras`]), the leaf-free model
+//! primitives ([`model`] — [`Density`], [`TabDigitKeys`], [`Warning`], and the shared serde field
+//! defaults), the house-style formatter ([`fmt`]), hex colour parsing ([`colour`]), structural
+//! config edits ([`edit`]), config-path resolution ([`paths`]), and starter-config seeding
+//! ([`seed`]). Each app supplies its own leaf tab and window/group extras (curator's
+//! `url`/`session`, warden's `dir`/`shell`/`probe`, lector's `dir`).
 //!
 //! # Modules
 //!
+//! - [`window`] — [`Window<T, X, G>`] and [`Group<T, G>`]: the common window and group keys, each
+//!   app's leaf `T`, and its extras `X`/`G`, which receive every key the container doesn't claim.
 //! - [`fmt`] — house-style TOML formatter (`format_str`, `format_file`). Atomic, diff-guarded,
 //!   watcher-loop safe. [`fmt_cli`] is the shared `fmt` CLI subcommand all three apps delegate to
 //!   (the `validate` subcommand stays per-app — it prints each app's own leaf schema).
@@ -37,13 +37,13 @@ pub mod model;
 pub mod paths;
 pub mod roots;
 pub mod seed;
+pub mod window;
 
 pub use colour::{Colour, ColourError};
 pub use edit::{add_tab, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use model::{
-    default_true, default_window_height, default_window_width, Density, Group, TabDigitKeys,
-    Warning,
+    default_true, default_window_height, default_window_width, Density, TabDigitKeys, Warning,
 };
 pub use paths::{default_config_path, resolve_config_path};
 pub use roots::{
@@ -51,6 +51,7 @@ pub use roots::{
     DiscoveredProject, RootDir, RootError, DEFAULT_ROOT_DEPTH,
 };
 pub use seed::{write_default_config, SeedError};
+pub use window::{Group, NoExtras, Window};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes
 // (`config_core::toml_edit::Value`) without declaring their own `toml_edit` dependency — which

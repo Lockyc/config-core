@@ -13,9 +13,13 @@ window and group settings pass down to each tab.
 config-core provides the leaf-agnostic pieces:
 
 - **`model`** — the leaf-free config-model primitives: `Density` (whole-app chrome sizing),
-  `TabDigitKeys` (the ⌘1/⌘2 jump-vs-cycle keybinding mode), the non-fatal `Warning`, and the logic-free `Group<T>`
-  container — a `name` plus a `Vec<T>` of each app's own leaf tab.
+  `TabDigitKeys` (the ⌘1/⌘2 jump-vs-cycle keybinding mode) and the non-fatal `Warning`.
   It also holds the shared serde defaults (`default_true`, `default_window_width`/`_height`).
+- **`window`** — the `[[window]]` / `[[window.group]]` container, `Window<T, X, G>` and
+  `Group<T, G>`: the common keys (`title`, `width`, `height`, `colour`, `open_on_start`, `group`;
+  a group's `name`, `tab`), each app's leaf tab `T`, and its own window/group extras `X`/`G`
+  (`NoExtras` when it has none). Any key outside the common set goes to the extras, so an unknown
+  key is reported by name.
 - **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
   fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
   a blank line between window/group tables but none between the `tab` tables nested inside them. `format_file` rewrites atomically and

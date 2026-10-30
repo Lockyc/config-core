@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 thiserror = "2"
 # Typed config-model primitives (model.rs) derive Serialize/Deserialize so the apps can
-# `toml::from_str` a config whose shared parts (Density, TabDigitKeys, Group<T>, …) live here.
+# `toml::from_str` a config whose shared parts (Density, TabDigitKeys, …) live here.
 # config-core already spans TOML's *document* mode (toml_edit, for fmt/edit); hosting typed
 # primitives completes it into the *loading* mode too — every `*-config` sibling already pulls serde.
 serde = { version = "1", features = ["derive"] }
@@ -25,8 +25,6 @@ tempfile = "3"
 # Structural, comment-preserving TOML editing for edit::add_tab (append a tab table without
 # reformatting the rest of the file).
 toml_edit = "0.25"
-
-[dev-dependencies]
-# Only the model.rs unit tests deserialize via the runtime loader; the crate's own API doesn't
-# parse (yet), so toml is a test-only dep.
+# Window/Group deserialize via a `toml::Table` so the common keys can be split from the app's
+# extras (window.rs). The same major the apps load their configs with.
 toml = "0.8"
