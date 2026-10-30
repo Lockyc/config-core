@@ -21,8 +21,8 @@ pub enum EditError {
     TabNotFound(String),
     #[error("a window titled {0:?} already exists")]
     WindowExists(String),
-    #[error("config has a `tab` entry that is not an array of tables")]
-    MalformedTab,
+    #[error("config has a `{0}` entry that is not an array of tables")]
+    Malformed(&'static str),
 }
 
 /// Address of a window, group or tab table. Windows and groups match on their trimmed `title` /
@@ -89,7 +89,7 @@ fn tab_index(owner: &Table, key: &str, val: &str) -> Result<usize, EditError> {
         None => Err(EditError::TabNotFound(format!("{key} = {val:?}"))),
         Some(item) => item
             .as_array_of_tables()
-            .ok_or(EditError::MalformedTab)?
+            .ok_or(EditError::Malformed("tab"))?
             .iter()
             .position(|t| t.get(key).and_then(Item::as_str) == Some(val))
             .ok_or_else(|| EditError::TabNotFound(format!("{key} = {val:?}"))),
@@ -101,7 +101,7 @@ fn tabs_or_create(owner: &mut Table) -> Result<&mut ArrayOfTables, EditError> {
         .entry("tab")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
-        .ok_or(EditError::MalformedTab)
+        .ok_or(EditError::Malformed("tab"))
 }
 
 fn table_from(fields: &[(&str, Value)]) -> Table {
@@ -149,7 +149,7 @@ pub fn add_window(path: &Path, fields: &[(&str, Value)]) -> Result<(), EditError
     doc.entry("window")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
-        .ok_or_else(|| EditError::WindowNotFound("window".to_string()))?
+        .ok_or(EditError::Malformed("window"))?
         .push(new);
     save(path, &doc)
 }
@@ -161,7 +161,7 @@ pub fn add_group(path: &Path, window: &str, fields: &[(&str, Value)]) -> Result<
     win.entry("group")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
-        .ok_or_else(|| EditError::GroupNotFound("group".to_string()))?
+        .ok_or(EditError::Malformed("group"))?
         .push(table_from(fields));
     save(path, &doc)
 }
@@ -385,7 +385,7 @@ mod tests {
             &[("title", "X".into()), ("url", "https://x.test/".into())],
         )
         .unwrap_err();
-        assert!(matches!(err, EditError::MalformedTab));
+        assert!(matches!(err, EditError::Malformed("tab")));
     }
 
     const SAMPLE: &str = "# top\n[[window]]\ntitle = \"Comms\" # inline\n\n# loose a\n[[window.tab]]\ntitle = \"A\"\nurl = \"https://a.test/\"\n\n# loose b\n[[window.tab]]\ntitle = \"B\"\nurl = \"https://b.test/\"\n\n[[window.group]]\nname = \"Chat\"\n\n# grouped c\n[[window.group.tab]]\ntitle = \"C\"\nurl = \"https://c.test/\"\n\n[[window.group]]\nname = \"Other\"\n\n[[window]]\ntitle = \"Second\"\n";
@@ -572,5 +572,49 @@ mod tests {
                 && out.contains("title = \"C\"")
                 && out.contains("title = \"A\"")
         );
+    }
+
+    #[test]
+    fn non_array_window_or_group_key_is_malformed() {
+        let (_d, p) = write_tmp("window = \"oops\"\n");
+        let err = add_window(&p, &[("title", "X".into())]).unwrap_err();
+        assert!(matches!(err, EditError::Malformed("window")));
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"W\"\ngroup = \"oops\"\n");
+        let err = add_group(&p, "W", &[("name", "G".into())]).unwrap_err();
+        assert!(matches!(err, EditError::Malformed("group")));
+    }
+
+    /// Pins toml_edit printing an unpositioned table under its new parent (after that parent's last
+    /// descendant): a toml_edit upgrade that changes this misfiles tabs silently.
+    #[test]
+    fn moved_and_added_tabs_land_under_their_parent() {
+        let (_d, p) = write_tmp(
+            "[[window]]\ntitle = \"W1\"\n[[window.group]]\nname = \"G1\"\n[[window.group.tab]]\ntitle = \"a\"\n[[window.group]]\nname = \"G2\"\n[[window.group.tab]]\ntitle = \"b\"\n\n[[window]]\ntitle = \"W2\"\n[[window.group]]\nname = \"G3\"\n[[window.group.tab]]\ntitle = \"c\"\n[[window.group]]\nname = \"G4\"\n[[window.group.tab]]\ntitle = \"d\"\n",
+        );
+        move_tab(
+            &p,
+            at("W2", Some("G4"), Some(("title", "d"))),
+            "W1",
+            Some("G1"),
+        )
+        .unwrap();
+        add_tab(&p, "W1", Some("G1"), &[("title", "e".into())]).unwrap();
+        let doc = parse(&p);
+        let titles = |w: usize, g: usize| -> Vec<String> {
+            doc["window"][w]["group"][g]
+                .get("tab")
+                .and_then(Item::as_array_of_tables)
+                .map(|ts| {
+                    ts.iter()
+                        .map(|t| t["title"].as_str().unwrap().to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(titles(0, 0), ["a", "d", "e"]);
+        assert_eq!(titles(0, 1), ["b"]);
+        assert_eq!(titles(1, 0), ["c"]);
+        assert!(titles(1, 1).is_empty());
+        assert_eq!(doc["window"][1]["group"][1]["name"].as_str(), Some("G4"));
     }
 }
