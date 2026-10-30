@@ -4,10 +4,12 @@
 //! its leaf tab `T`, its window extras `X`, and its group extras `G` (or [`NoExtras`]). The
 //! container never interprets `T`, `X` or `G` — it only holds them.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use serde::de::{self, DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
+use thiserror::Error;
 use toml::Table;
 
 use crate::model::{default_window_height, default_window_width};
@@ -114,6 +116,64 @@ fn remainder<V: DeserializeOwned, E: de::Error>(t: Table) -> Result<V, E> {
     toml::Value::Table(t)
         .try_into()
         .map_err(|e: toml::de::Error| E::custom(e.message()))
+}
+
+/// Why a window list failed [`validate_windows`]. Titles and group names are compared and reported
+/// trimmed.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum WindowError {
+    #[error("window #{} has an empty title", index + 1)]
+    EmptyTitle { index: usize },
+    #[error("duplicate window title `{0}`")]
+    DuplicateTitle(String),
+    #[error("window `{0}` has a zero width or height")]
+    ZeroSize(String),
+    #[error("window `{window}` has an invalid colour `{value}`")]
+    BadColour { window: String, value: String },
+    #[error("window `{0}` has a group with an empty name")]
+    EmptyGroupName(String),
+    #[error("window `{window}` has more than one group named `{group}`")]
+    DuplicateGroupName { window: String, group: String },
+}
+
+/// Checks the keys every app shares: titles non-empty and unique, non-zero sizes, parseable
+/// colours, group names non-empty and unique within their window.
+pub fn validate_windows<T, X, G>(windows: &[Window<T, X, G>]) -> Result<(), WindowError> {
+    let mut titles = HashSet::new();
+    for (index, w) in windows.iter().enumerate() {
+        let title = w.title.trim();
+        if title.is_empty() {
+            return Err(WindowError::EmptyTitle { index });
+        }
+        if !titles.insert(title) {
+            return Err(WindowError::DuplicateTitle(title.to_string()));
+        }
+        if w.width == 0 || w.height == 0 {
+            return Err(WindowError::ZeroSize(title.to_string()));
+        }
+        if let Some(value) = &w.colour {
+            if crate::Colour::parse(value).is_err() {
+                return Err(WindowError::BadColour {
+                    window: title.to_string(),
+                    value: value.clone(),
+                });
+            }
+        }
+        let mut names = HashSet::new();
+        for g in &w.groups {
+            let name = g.name.trim();
+            if name.is_empty() {
+                return Err(WindowError::EmptyGroupName(title.to_string()));
+            }
+            if !names.insert(name) {
+                return Err(WindowError::DuplicateGroupName {
+                    window: title.to_string(),
+                    group: name.to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -257,5 +317,114 @@ mod tests {
         assert!(g.tabs.is_empty());
         // A stray group-level key is rejected.
         assert!(toml::from_str::<Group<Leaf>>("name = \"X\"\nbogus = 1\n").is_err());
+    }
+
+    fn win(title: &str) -> Window<Leaf> {
+        Window {
+            title: title.into(),
+            width: 100,
+            height: 100,
+            colour: None,
+            open_on_start: true,
+            groups: vec![],
+            extra: NoExtras,
+        }
+    }
+
+    fn grp(name: &str) -> Group<Leaf> {
+        Group {
+            name: name.into(),
+            tabs: vec![],
+            extra: NoExtras,
+        }
+    }
+
+    #[test]
+    fn empty_title_errors() {
+        assert_eq!(
+            validate_windows(&[win("A"), win("  ")]),
+            Err(WindowError::EmptyTitle { index: 1 })
+        );
+    }
+
+    #[test]
+    fn titles_differing_only_by_whitespace_collide() {
+        assert_eq!(
+            validate_windows(&[win("A"), win(" A ")]),
+            Err(WindowError::DuplicateTitle("A".into()))
+        );
+    }
+
+    #[test]
+    fn zero_width_errors() {
+        let mut w = win("A");
+        w.width = 0;
+        assert_eq!(
+            validate_windows(&[w]),
+            Err(WindowError::ZeroSize("A".into()))
+        );
+    }
+
+    #[test]
+    fn zero_height_errors() {
+        let mut w = win("A");
+        w.height = 0;
+        assert_eq!(
+            validate_windows(&[w]),
+            Err(WindowError::ZeroSize("A".into()))
+        );
+    }
+
+    #[test]
+    fn bad_colour_errors() {
+        let mut w = win("A");
+        w.colour = Some("red".into());
+        assert_eq!(
+            validate_windows(&[w]),
+            Err(WindowError::BadColour {
+                window: "A".into(),
+                value: "red".into()
+            })
+        );
+    }
+
+    #[test]
+    fn empty_group_name_errors() {
+        let mut w = win("A");
+        w.groups = vec![grp(" ")];
+        assert_eq!(
+            validate_windows(&[w]),
+            Err(WindowError::EmptyGroupName("A".into()))
+        );
+    }
+
+    #[test]
+    fn duplicate_group_name_within_a_window_errors() {
+        let mut w = win("A");
+        w.groups = vec![grp("G"), grp("G ")];
+        assert_eq!(
+            validate_windows(&[w]),
+            Err(WindowError::DuplicateGroupName {
+                window: "A".into(),
+                group: "G".into()
+            })
+        );
+    }
+
+    #[test]
+    fn same_group_name_in_two_windows_is_fine() {
+        let mut a = win("A");
+        a.groups = vec![grp("G")];
+        let mut b = win("B");
+        b.groups = vec![grp("G")];
+        assert_eq!(validate_windows(&[a, b]), Ok(()));
+    }
+
+    #[test]
+    fn valid_config_passes() {
+        let mut a = win("A");
+        a.colour = Some("#abc".into());
+        a.groups = vec![grp("G"), grp("H")];
+        assert_eq!(validate_windows(&[a, win("B")]), Ok(()));
     }
 }

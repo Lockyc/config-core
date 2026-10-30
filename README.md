@@ -19,7 +19,7 @@ config-core provides the leaf-agnostic pieces:
   `Group<T, G>`: the common keys (`title`, `width`, `height`, `colour`, `open_on_start`, `group`;
   a group's `name`, `tab`), each app's leaf tab `T`, and its own window/group extras `X`/`G`
   (`NoExtras` when it has none). Any key outside the common set goes to the extras, so an unknown
-  key is reported by name.
+  key is reported by name. `validate_windows` checks the shared keys (titles, sizes, colours, group names).
 - **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
   fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
   a blank line between window/group tables but none between the `tab` tables nested inside them. `format_file` rewrites atomically and

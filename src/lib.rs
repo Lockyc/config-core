@@ -13,6 +13,7 @@
 //!
 //! - [`window`] — [`Window<T, X, G>`] and [`Group<T, G>`]: the common window and group keys, each
 //!   app's leaf `T`, and its extras `X`/`G`, which receive every key the container doesn't claim.
+//!   [`validate_windows`] checks the shared keys.
 //! - [`fmt`] — house-style TOML formatter (`format_str`, `format_file`). Atomic, diff-guarded,
 //!   watcher-loop safe. [`fmt_cli`] is the shared `fmt` CLI subcommand all three apps delegate to
 //!   (the `validate` subcommand stays per-app — it prints each app's own leaf schema).
@@ -51,7 +52,7 @@ pub use roots::{
     DiscoveredProject, RootDir, RootError, DEFAULT_ROOT_DEPTH,
 };
 pub use seed::{write_default_config, SeedError};
-pub use window::{Group, NoExtras, Window};
+pub use window::{validate_windows, Group, NoExtras, Window, WindowError};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes
 // (`config_core::toml_edit::Value`) without declaring their own `toml_edit` dependency — which
