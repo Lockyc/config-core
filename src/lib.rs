@@ -18,10 +18,10 @@
 //!   watcher-loop safe. [`fmt_cli`] is the shared `fmt` CLI subcommand all three apps delegate to
 //!   (the `validate` subcommand stays per-app — it prints each app's own leaf schema).
 //! - [`colour`] — `#rgb`/`#rrggbb` hex accent-colour parsing ([`Colour`], [`ColourError`]).
-//! - [`edit`] — leaf-agnostic structural insertion. [`add_tab`] appends a `[[window.tab]]` or
-//!   `[[window.group.tab]]` table from an ordered field list, atomic and comment-preserving via
-//!   `toml_edit`. The caller supplies the fields; this module knows nothing about what they mean.
-//!   [`add_window`], [`add_group`], [`remove`], [`set_field`] and [`move_tab`] edit by [`At`] address.
+//! - [`edit`] — leaf-agnostic structural add/remove/set/move edits of windows, groups and tabs
+//!   ([`add_window`], [`add_group`], [`add_tab`], [`remove`], [`set_field`], [`move_tab`], the last
+//!   three addressed by [`At`]), atomic and comment-preserving via `toml_edit`. The caller supplies
+//!   the fields; this module knows nothing about what they mean.
 //! - [`paths`] — where an app's config file lives. [`resolve_config_path`] checks the app's env
 //!   override (set and non-empty) before falling back to [`default_config_path`]
 //!   (`~/.config/<app_dir>/config.toml`).
