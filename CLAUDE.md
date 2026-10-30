@@ -22,15 +22,17 @@ Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for 
 - `model` — leaf-free model primitives (`Density`, `TabDigitKeys`, `Warning`, shared serde
   defaults). All three apps re-export them.
 - `window` — the `Window<T, X, G>` / `Group<T, G>` container, generic over each app's leaf `T` and
-  extras `X`/`G` (`NoExtras` when an app has none).
+  extras `X`/`G` (`NoExtras` when an app has none); `validate_windows` (shared keys) and
+  `retitle_window` (an in-place rename carried into a loaded config).
 - `roots` — project-tree discovery (`scan_root`, `resolve_root_dir`, `discover_projects`,
   `tree_path`). Consumed by warden and lector.
 - `fmt` — the house TOML formatter (`format_str`, `format_file`) and the shared `fmt` CLI
   subcommand (`fmt_cli`) all three apps delegate to. `validate` stays per-app: it prints each
   app's own leaf schema.
 - `colour` — `Colour::parse` / `Colour::hex` for accent colours.
-- `edit` — `add_tab` plus `add_window`/`edit_window`/`add_group`/`remove`/`set_field`/`move_tab` (addressed by `At`): comment-preserving, re-reading the file per call.
-  Consumed by curator and warden. `toml_edit` is re-exported (`config_core::toml_edit`) so a
+- `edit` — `add_tab` plus `add_window`/`edit_window`/`add_group`/`remove`/`set_field`/`move_tab` (addressed by `At`)
+  and `set_key`/`remove_key` (one root key): comment-preserving, re-reading the file per call.
+  Every app's window form writes through `add_window`/`edit_window`/`remove`. `toml_edit` is re-exported (`config_core::toml_edit`) so a
   consumer can name the field-value type without pinning its own `toml_edit`, which would risk a
   version skew against this crate's API.
 - `paths` — `resolve_config_path` / `default_config_path`: every app's config location, differing
