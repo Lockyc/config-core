@@ -32,6 +32,7 @@ config-core provides the leaf-agnostic pieces:
   `toml_edit`. The caller supplies an ordered field list for any leaf shape. An unknown group is an
   error. Field values are `config_core::toml_edit::Value` (`toml_edit` is re-exported; callers need
   no dependency of their own on it).
+  `add_window`, `add_group`, `remove`, `set_field` and `move_tab` edit windows, groups and tabs by an `At` address.
 - **`paths`** — config-path resolution (`resolve_config_path`, `default_config_path`). The
   environment variable the app names (e.g. `WARDEN_CONFIG`) wins when set and non-empty; otherwise
   the path is the default

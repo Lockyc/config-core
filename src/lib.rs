@@ -21,6 +21,7 @@
 //! - [`edit`] — leaf-agnostic structural insertion. [`add_tab`] appends a `[[window.tab]]` or
 //!   `[[window.group.tab]]` table from an ordered field list, atomic and comment-preserving via
 //!   `toml_edit`. The caller supplies the fields; this module knows nothing about what they mean.
+//!   [`add_window`], [`add_group`], [`remove`], [`set_field`] and [`move_tab`] edit by [`At`] address.
 //! - [`paths`] — where an app's config file lives. [`resolve_config_path`] checks the app's env
 //!   override (set and non-empty) before falling back to [`default_config_path`]
 //!   (`~/.config/<app_dir>/config.toml`).
@@ -41,7 +42,7 @@ pub mod seed;
 pub mod window;
 
 pub use colour::{Colour, ColourError};
-pub use edit::{add_tab, EditError};
+pub use edit::{add_group, add_tab, add_window, move_tab, remove, set_field, At, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use model::{
     default_true, default_window_height, default_window_width, Density, TabDigitKeys, Warning,

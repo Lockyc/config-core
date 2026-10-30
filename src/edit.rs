@@ -1,6 +1,7 @@
 //! Leaf-agnostic structural edits to a config file. Each app builds its own field list (curator:
-//! `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls `add_tab`; this module knows
-//! nothing about what the fields mean. Comment/format preserving — only the new table is added.
+//! `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls these; this module knows nothing
+//! about what the fields mean. Comment/format preserving — only the addressed table changes. Every
+//! call re-reads the file, so an external edit between two calls is never overwritten.
 
 use crate::io::atomic_write;
 use std::path::Path;
@@ -16,8 +17,108 @@ pub enum EditError {
     WindowNotFound(String),
     #[error("window has no group named {0:?}")]
     GroupNotFound(String),
+    #[error("no tab with that key/value: {0}")]
+    TabNotFound(String),
+    #[error("a window titled {0:?} already exists")]
+    WindowExists(String),
     #[error("config has a `tab` entry that is not an array of tables")]
     MalformedTab,
+}
+
+/// Address of a window, group or tab table. Windows and groups match on their trimmed `title` /
+/// `name`; `tab` is a `(key, value)` string match inside the addressed tab array — the window's
+/// loose `tab` array when `group` is `None`, else that group's.
+#[derive(Debug, Clone, Copy)]
+pub struct At<'a> {
+    pub window: &'a str,
+    pub group: Option<&'a str>,
+    pub tab: Option<(&'a str, &'a str)>,
+}
+
+fn matches_trimmed(t: &Table, key: &str, want: &str) -> bool {
+    t.get(key)
+        .and_then(Item::as_str)
+        .is_some_and(|s| s.trim() == want.trim())
+}
+
+fn window_index(doc: &DocumentMut, title: &str) -> Result<usize, EditError> {
+    doc.get("window")
+        .and_then(Item::as_array_of_tables)
+        .and_then(|ws| ws.iter().position(|t| matches_trimmed(t, "title", title)))
+        .ok_or_else(|| EditError::WindowNotFound(title.to_string()))
+}
+
+fn window_mut<'d>(doc: &'d mut DocumentMut, title: &str) -> Result<&'d mut Table, EditError> {
+    let i = window_index(doc, title)?;
+    Ok(doc["window"]
+        .as_array_of_tables_mut()
+        .and_then(|ws| ws.get_mut(i))
+        .expect("index just found"))
+}
+
+fn group_index(win: &Table, name: &str) -> Result<usize, EditError> {
+    win.get("group")
+        .and_then(Item::as_array_of_tables)
+        .and_then(|gs| gs.iter().position(|t| matches_trimmed(t, "name", name)))
+        .ok_or_else(|| EditError::GroupNotFound(name.to_string()))
+}
+
+fn group_mut<'d>(win: &'d mut Table, name: &str) -> Result<&'d mut Table, EditError> {
+    let i = group_index(win, name)?;
+    Ok(win["group"]
+        .as_array_of_tables_mut()
+        .and_then(|gs| gs.get_mut(i))
+        .expect("index just found"))
+}
+
+/// The table that owns the addressed tab array: the window, or one of its groups.
+fn tab_owner_mut<'d>(
+    doc: &'d mut DocumentMut,
+    window: &str,
+    group: Option<&str>,
+) -> Result<&'d mut Table, EditError> {
+    let win = window_mut(doc, window)?;
+    match group {
+        None => Ok(win),
+        Some(g) => group_mut(win, g),
+    }
+}
+
+fn tab_index(owner: &Table, key: &str, val: &str) -> Result<usize, EditError> {
+    match owner.get("tab") {
+        None => Err(EditError::TabNotFound(format!("{key} = {val:?}"))),
+        Some(item) => item
+            .as_array_of_tables()
+            .ok_or(EditError::MalformedTab)?
+            .iter()
+            .position(|t| t.get(key).and_then(Item::as_str) == Some(val))
+            .ok_or_else(|| EditError::TabNotFound(format!("{key} = {val:?}"))),
+    }
+}
+
+fn tabs_or_create(owner: &mut Table) -> Result<&mut ArrayOfTables, EditError> {
+    owner
+        .entry("tab")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .ok_or(EditError::MalformedTab)
+}
+
+fn table_from(fields: &[(&str, Value)]) -> Table {
+    let mut t = Table::new();
+    for (k, v) in fields {
+        t.insert(k, value(v.clone()));
+    }
+    t
+}
+
+fn load(path: &Path) -> Result<DocumentMut, EditError> {
+    Ok(std::fs::read_to_string(path)?.parse()?)
+}
+
+fn save(path: &Path, doc: &DocumentMut) -> Result<(), EditError> {
+    atomic_write(path, &doc.to_string())?;
+    Ok(())
 }
 
 /// Append a `[[window.tab]]` (group `None`) or `[[window.group.tab]]` (group `Some(name)`) table
@@ -29,49 +130,137 @@ pub fn add_tab(
     group: Option<&str>,
     fields: &[(&str, Value)],
 ) -> Result<(), EditError> {
-    let src = std::fs::read_to_string(path)?;
-    let mut doc: DocumentMut = src.parse()?;
+    let mut doc = load(path)?;
+    let owner = tab_owner_mut(&mut doc, window_title, group)?;
+    tabs_or_create(owner)?.push(table_from(fields));
+    save(path, &doc)
+}
 
-    let windows = doc
-        .get_mut("window")
-        .and_then(Item::as_array_of_tables_mut)
-        .ok_or_else(|| EditError::WindowNotFound(window_title.to_string()))?;
-    let win = windows
-        .iter_mut()
-        .find(|t| t.get("title").and_then(|v| v.as_str()) == Some(window_title))
-        .ok_or_else(|| EditError::WindowNotFound(window_title.to_string()))?;
-
-    // Build the new tab table from the ordered fields (leaf-agnostic).
-    let mut tab = Table::new();
-    for (k, v) in fields {
-        tab.insert(k, value(v.clone()));
-    }
-
-    let tabs = match group {
-        None => win
-            .entry("tab")
-            .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
-            .as_array_of_tables_mut()
-            .ok_or(EditError::MalformedTab)?,
-        Some(g) => {
-            let groups = win
-                .get_mut("group")
-                .and_then(Item::as_array_of_tables_mut)
-                .ok_or_else(|| EditError::GroupNotFound(g.to_string()))?;
-            let grp = groups
-                .iter_mut()
-                .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(g))
-                .ok_or_else(|| EditError::GroupNotFound(g.to_string()))?;
-            grp.entry("tab")
-                .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
-                .as_array_of_tables_mut()
-                .ok_or(EditError::MalformedTab)?
+/// Append a `[[window]]` populated with `fields`. Errors `WindowExists` when its trimmed `title`
+/// is already taken.
+pub fn add_window(path: &Path, fields: &[(&str, Value)]) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    let new = table_from(fields);
+    if let Some(title) = new.get("title").and_then(Item::as_str) {
+        if window_index(&doc, title).is_ok() {
+            return Err(EditError::WindowExists(title.trim().to_string()));
         }
-    };
-    tabs.push(tab);
+    }
+    doc.entry("window")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .ok_or_else(|| EditError::WindowNotFound("window".to_string()))?
+        .push(new);
+    save(path, &doc)
+}
 
-    atomic_write(path, &doc.to_string())?;
-    Ok(())
+/// Append a `[[window.group]]` populated with `fields` to the named window.
+pub fn add_group(path: &Path, window: &str, fields: &[(&str, Value)]) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    let win = window_mut(&mut doc, window)?;
+    win.entry("group")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
+        .as_array_of_tables_mut()
+        .ok_or_else(|| EditError::GroupNotFound("group".to_string()))?
+        .push(table_from(fields));
+    save(path, &doc)
+}
+
+/// Remove the addressed tab, else group (with its tabs), else window (with everything in it).
+pub fn remove(path: &Path, at: At) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    match (at.group, at.tab) {
+        (g, Some((k, v))) => {
+            let owner = tab_owner_mut(&mut doc, at.window, g)?;
+            let i = tab_index(owner, k, v)?;
+            let tabs = owner["tab"].as_array_of_tables_mut().expect("checked");
+            tabs.remove(i);
+            if tabs.is_empty() {
+                owner.remove("tab");
+            }
+        }
+        (Some(g), None) => {
+            let win = window_mut(&mut doc, at.window)?;
+            let i = group_index(win, g)?;
+            let groups = win["group"].as_array_of_tables_mut().expect("checked");
+            groups.remove(i);
+            if groups.is_empty() {
+                win.remove("group");
+            }
+        }
+        (None, None) => {
+            let i = window_index(&doc, at.window)?;
+            let ws = doc["window"].as_array_of_tables_mut().expect("checked");
+            ws.remove(i);
+            if ws.is_empty() {
+                doc.remove("window");
+            }
+        }
+    }
+    save(path, &doc)
+}
+
+/// Set `key` on the addressed table (tab, else group, else window); `None` removes it. An existing
+/// value keeps its surrounding whitespace and inline comment. Setting a window's `title` renames it.
+pub fn set_field(path: &Path, at: At, key: &str, new: Option<Value>) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    let target: &mut Table = match (at.group, at.tab) {
+        (g, Some((k, v))) => {
+            let owner = tab_owner_mut(&mut doc, at.window, g)?;
+            let i = tab_index(owner, k, v)?;
+            owner["tab"]
+                .as_array_of_tables_mut()
+                .and_then(|a| a.get_mut(i))
+                .expect("checked")
+        }
+        (Some(g), None) => group_mut(window_mut(&mut doc, at.window)?, g)?,
+        (None, None) => window_mut(&mut doc, at.window)?,
+    };
+    match new {
+        None => {
+            target.remove(key);
+        }
+        Some(mut v) => {
+            if let Some(old) = target.get(key).and_then(Item::as_value) {
+                *v.decor_mut() = old.decor().clone();
+            }
+            target.insert(key, Item::Value(v));
+        }
+    }
+    save(path, &doc)
+}
+
+/// Move the tab addressed by `from` to the end of the named window's group `to_group` (`None`: the
+/// window's loose `tab` array). The table travels whole, comments included.
+pub fn move_tab(
+    path: &Path,
+    from: At,
+    to_window: &str,
+    to_group: Option<&str>,
+) -> Result<(), EditError> {
+    let (k, v) = from
+        .tab
+        .ok_or_else(|| EditError::TabNotFound("no tab addressed".to_string()))?;
+    let mut doc = load(path)?;
+    // Resolve the destination first so a bad one leaves the source untouched.
+    tab_owner_mut(&mut doc, to_window, to_group)?;
+    let table = {
+        let owner = tab_owner_mut(&mut doc, from.window, from.group)?;
+        let i = tab_index(owner, k, v)?;
+        let tabs = owner["tab"].as_array_of_tables_mut().expect("checked");
+        let t = tabs.remove(i);
+        if tabs.is_empty() {
+            owner.remove("tab");
+        }
+        t
+    };
+    let mut table = table;
+    // A parsed table remembers its old document position and would print there, under its old
+    // parent; unpositioned, it prints with its new parent like any freshly pushed table.
+    table.set_position(None);
+    let dest = tab_owner_mut(&mut doc, to_window, to_group)?;
+    tabs_or_create(dest)?.push(table);
+    save(path, &doc)
 }
 
 #[cfg(test)]
@@ -197,5 +386,191 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, EditError::MalformedTab));
+    }
+
+    const SAMPLE: &str = "# top\n[[window]]\ntitle = \"Comms\" # inline\n\n# loose a\n[[window.tab]]\ntitle = \"A\"\nurl = \"https://a.test/\"\n\n# loose b\n[[window.tab]]\ntitle = \"B\"\nurl = \"https://b.test/\"\n\n[[window.group]]\nname = \"Chat\"\n\n# grouped c\n[[window.group.tab]]\ntitle = \"C\"\nurl = \"https://c.test/\"\n\n[[window.group]]\nname = \"Other\"\n\n[[window]]\ntitle = \"Second\"\n";
+
+    fn at<'a>(window: &'a str, group: Option<&'a str>, tab: Option<(&'a str, &'a str)>) -> At<'a> {
+        At { window, group, tab }
+    }
+
+    fn parse(p: &std::path::Path) -> DocumentMut {
+        std::fs::read_to_string(p).unwrap().parse().unwrap()
+    }
+
+    #[test]
+    fn add_window_appends_and_refuses_a_taken_title() {
+        let (_d, p) = write_tmp("# keep\n[[window]]\ntitle = \"Comms\"\n");
+        add_window(&p, &[("title", "New".into())]).unwrap();
+        let doc = parse(&p);
+        assert_eq!(doc["window"].as_array_of_tables().unwrap().len(), 2);
+        assert!(std::fs::read_to_string(&p).unwrap().contains("# keep"));
+        let err = add_window(&p, &[("title", " Comms ".into())]).unwrap_err();
+        assert!(matches!(err, EditError::WindowExists(_)));
+        // First window into a config that has none.
+        let (_d2, p2) = write_tmp("# empty\n");
+        add_window(&p2, &[("title", "One".into())]).unwrap();
+        assert_eq!(parse(&p2)["window"][0]["title"].as_str(), Some("One"));
+    }
+
+    #[test]
+    fn add_group_appends_to_named_window() {
+        let (_d, p) = write_tmp(SAMPLE);
+        add_group(&p, "Second", &[("name", "G".into())]).unwrap();
+        let doc = parse(&p);
+        assert_eq!(doc["window"][1]["group"][0]["name"].as_str(), Some("G"));
+        let err = add_group(&p, "Nope", &[("name", "G".into())]).unwrap_err();
+        assert!(matches!(err, EditError::WindowNotFound(_)));
+    }
+
+    #[test]
+    fn remove_tab_by_url_keeps_neighbours_and_comments() {
+        let (_d, p) = write_tmp(SAMPLE);
+        remove(&p, at("Comms", None, Some(("url", "https://a.test/")))).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(!out.contains("https://a.test/"));
+        assert!(out.contains("# top") && out.contains("# inline") && out.contains("# loose b"));
+        assert!(out.contains("https://b.test/") && out.contains("https://c.test/"));
+    }
+
+    #[test]
+    fn remove_group_removes_its_tabs() {
+        let (_d, p) = write_tmp(SAMPLE);
+        remove(&p, at("Comms", Some("Chat"), None)).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(!out.contains("Chat") && !out.contains("https://c.test/"));
+        assert!(out.contains("Other") && out.contains("https://a.test/"));
+    }
+
+    #[test]
+    fn remove_window_removes_the_block() {
+        let (_d, p) = write_tmp(SAMPLE);
+        remove(&p, at("Comms", None, None)).unwrap();
+        let doc = parse(&p);
+        let ws = doc["window"].as_array_of_tables().unwrap();
+        assert_eq!(ws.len(), 1);
+        assert_eq!(ws.get(0).unwrap()["title"].as_str(), Some("Second"));
+    }
+
+    #[test]
+    fn set_field_sets_and_unsets() {
+        let (_d, p) = write_tmp(SAMPLE);
+        let target = at("Comms", None, Some(("title", "B")));
+        set_field(&p, target, "load_on_open", Some(true.into())).unwrap();
+        set_field(
+            &p,
+            at("Comms", None, Some(("title", "B"))),
+            "url",
+            Some("https://z.test/".into()),
+        )
+        .unwrap();
+        let doc = parse(&p);
+        let b = doc["window"][0]["tab"][1].as_table().unwrap();
+        assert_eq!(b["load_on_open"].as_bool(), Some(true));
+        assert_eq!(b["url"].as_str(), Some("https://z.test/"));
+        set_field(
+            &p,
+            at("Comms", None, Some(("title", "B"))),
+            "load_on_open",
+            None,
+        )
+        .unwrap();
+        assert!(parse(&p)["window"][0]["tab"][1]
+            .get("load_on_open")
+            .is_none());
+        // Group-level field.
+        set_field(
+            &p,
+            at("Comms", Some("Chat"), None),
+            "collapsed",
+            Some(true.into()),
+        )
+        .unwrap();
+        assert_eq!(
+            parse(&p)["window"][0]["group"][0]["collapsed"].as_bool(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn set_field_on_window_title_renames() {
+        let (_d, p) = write_tmp(SAMPLE);
+        set_field(&p, at("Comms", None, None), "title", Some("Renamed".into())).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.contains("title = \"Renamed\" # inline"));
+        assert!(add_tab(&p, "Renamed", None, &[("title", "X".into())]).is_ok());
+    }
+
+    #[test]
+    fn move_tab_between_groups_keeps_fields() {
+        let (_d, p) = write_tmp(SAMPLE);
+        move_tab(
+            &p,
+            at("Comms", None, Some(("url", "https://a.test/"))),
+            "Comms",
+            Some("Other"),
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        let doc = parse(&p);
+        let moved = doc["window"][0]["group"][1]["tab"][0].as_table().unwrap();
+        assert_eq!(moved["title"].as_str(), Some("A"));
+        assert_eq!(moved["url"].as_str(), Some("https://a.test/"));
+        assert_eq!(
+            doc["window"][0]["tab"].as_array_of_tables().unwrap().len(),
+            1
+        );
+        assert!(out.contains("# loose a"));
+        // And back to the loose array of another window.
+        move_tab(
+            &p,
+            at("Comms", Some("Other"), Some(("title", "A"))),
+            "Second",
+            None,
+        )
+        .unwrap();
+        let doc = parse(&p);
+        assert_eq!(doc["window"][1]["tab"][0]["title"].as_str(), Some("A"));
+    }
+
+    #[test]
+    fn unknown_tab_errors() {
+        let (_d, p) = write_tmp(SAMPLE);
+        let err = remove(&p, at("Comms", None, Some(("url", "https://nope/")))).unwrap_err();
+        assert!(matches!(err, EditError::TabNotFound(_)));
+        let err = set_field(
+            &p,
+            at("Comms", None, Some(("url", "https://nope/"))),
+            "x",
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, EditError::TabNotFound(_)));
+        let err = move_tab(
+            &p,
+            at("Comms", None, Some(("url", "https://nope/"))),
+            "Second",
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, EditError::TabNotFound(_)));
+        let err = remove(&p, at("Comms", Some("Ghost"), None)).unwrap_err();
+        assert!(matches!(err, EditError::GroupNotFound(_)));
+    }
+
+    #[test]
+    fn edit_after_external_change_preserves_it() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"W\"\n");
+        add_tab(&p, "W", None, &[("title", "A".into())]).unwrap();
+        let mut s = std::fs::read_to_string(&p).unwrap();
+        s.push_str("\n[[window]]\ntitle = \"B\"\n");
+        std::fs::write(&p, s).unwrap();
+        add_tab(&p, "W", None, &[("title", "C".into())]).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            out.contains("title = \"B\"")
+                && out.contains("title = \"C\"")
+                && out.contains("title = \"A\"")
+        );
     }
 }
