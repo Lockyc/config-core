@@ -45,7 +45,7 @@ impl Density {
 ///
 /// Deserializes from / serializes to the lowercase token the config file uses (`jump` / `cycle`);
 /// an unrecognised value is a parse error. [`TabDigitKeys::as_str`] is that token for the apps'
-/// Cycle Tabs menu toggle, which writes it back with [`crate::set_key`]. `tab_digit_keys`
+/// Cycle Tabs menu toggle, which writes it back ([`crate::toggle_tab_digit_keys`]). `tab_digit_keys`
 /// deliberately never reaches the chrome DTO the way density does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
