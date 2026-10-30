@@ -8,10 +8,11 @@ links:
 
 # config-core — agent notes
 
-A small Rust library crate of **domain-free TOML config primitives** shared by three sibling
+A small Rust library crate of **domain-free TOML config primitives** shared by four sibling
 macOS apps: [curator](https://github.com/Lockyc/curator) (webview console),
-[warden](https://github.com/Lockyc/warden) (terminal console), and
-[lector](https://github.com/Lockyc/lector) (local-docs console). All three share the same
+[warden](https://github.com/Lockyc/warden) (terminal console),
+[lector](https://github.com/Lockyc/lector) (local-docs console), and
+[flotilla](https://github.com/Lockyc/flotilla) (document workspace). All four share the same
 `window → group → tab` config shape and house style; this crate holds the parts that need no
 knowledge of any app's leaf tab fields.
 
@@ -20,14 +21,14 @@ knowledge of any app's leaf tab fields.
 Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for its behaviour.
 
 - `model` — leaf-free model primitives (`Density`, `TabDigitKeys`, `Warning`, shared serde
-  defaults). All three apps re-export them.
+  defaults). curator, warden and lector re-export them.
 - `window` — the `Window<T, X, G>` / `Group<T, G>` container, generic over each app's leaf `T` and
   extras `X`/`G` (`NoExtras` when an app has none); `validate_windows` (shared keys) and
   `retitle_window` (an in-place rename carried into a loaded config).
 - `roots` — project-tree discovery (`scan_root`, `resolve_root_dir`, `discover_projects`,
   `tree_path`). Consumed by warden and lector.
 - `fmt` — the house TOML formatter (`format_str`, `format_file`) and the shared `fmt` CLI
-  subcommand (`fmt_cli`) all three apps delegate to. `validate` stays per-app: it prints each
+  subcommand (`fmt_cli`) curator, warden and lector delegate to. `validate` stays per-app: it prints each
   app's own leaf schema.
 - `colour` — `Colour::parse` / `Colour::hex` for accent colours.
 - `edit` — `add_tab` plus `add_window`/`edit_window`/`add_group`/`remove`/`set_field`/`move_tab` (addressed by `At`)
@@ -41,14 +42,14 @@ Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for 
   the user asks (shell-core's home surface). The template is the caller's.
 
 `paths` and `seed` are filesystem primitives rather than TOML-content ones, and qualify on the same
-test as everything else here: identical and leaf-free in all three apps.
+test as everything else here: identical and leaf-free in every app.
 
 `io::atomic_write` and `io::atomic_create` are deliberately two functions; see `io.rs` and
 `atomic_write_still_refuses_a_nonexistent_target`.
 
 **config-core owns the window → group → tab container** — `Window<T, X, G>` and `Group<T, G>`
 (`window`) — and window-level validation; **each app owns its leaf `T` and its extras `X`/`G`**
-(curator's `url`/`session`, warden's `dir`/`shell`/`probe`, lector's `dir`; per-window and per-group
+(curator's `url`/`session`, warden's `dir`/`shell`/`probe`, lector's `dir`, flotilla's `url`; per-window and per-group
 decorations such as a window `session` or a group `url`). The container holds the common keys and
 hands every other key to the app's extras, which `deny_unknown_fields`, so an unknown key is still
 reported by name. Leaf meaning stays in the app.
@@ -63,10 +64,10 @@ leaf detection keys on the literal `tab` table name, which every app uses (`[[wi
 
 ## Consumed as a git dependency
 
-All three apps build from source on a fresh clone, so there's no crates.io publish — they depend
+All four apps build from source on a fresh clone, so there's no crates.io publish — they depend
 via `config-core = { git = "https://github.com/Lockyc/config-core" }`. Cargo fetches it at build
 time, so the apps' install-from-source flows keep working untouched. A breaking change here needs
-all three apps re-pointed/re-tested.
+all four apps re-pointed/re-tested.
 
 ## Branching
 

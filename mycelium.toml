@@ -1,5 +1,5 @@
 name    = "config-core"
-summary = "The shared config primitives behind warden, curator and lector — house-formats each app's TOML config, edits windows, groups and tabs while preserving your comments, provides the leaf-free model types, resolves the config path, parses accent colours, discovers project roots, and writes a starter config on request."
+summary = "The shared config primitives behind warden, curator, lector and flotilla — house-formats each app's TOML config, edits windows, groups and tabs while preserving your comments, provides the leaf-free model types, resolves the config path, parses accent colours, discovers project roots, and writes a starter config on request."
 kind    = "library"
 status  = "active"
 tags    = ["config", "toml", "formatter", "shared-core"]
@@ -10,7 +10,7 @@ topics_extra = ["library"]
 
 [[provides]]
 name    = "config-shape"
-summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand all three apps delegate to), #rgb/#rrggbb accent parsing, window validation, and comment-preserving structural edits of windows, groups, tabs and root keys. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
+summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand curator, warden and lector delegate to), #rgb/#rrggbb accent parsing, window validation, and comment-preserving structural edits of windows, groups, tabs and root keys. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
 
 [[provides]]
 name    = "config-path-seed"

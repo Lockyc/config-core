@@ -4,11 +4,12 @@
 [![License](https://img.shields.io/github/license/Lockyc/config-core)](LICENSE)
 
 Shared TOML config primitives for the [curator](https://github.com/Lockyc/curator),
-[warden](https://github.com/Lockyc/warden), and [lector](https://github.com/Lockyc/lector) apps,
-which share the same `window → group → tab` config shape and house style.
+[warden](https://github.com/Lockyc/warden), [lector](https://github.com/Lockyc/lector) and
+[flotilla](https://github.com/Lockyc/flotilla) apps, which share the same
+`window → group → tab` config shape and house style.
 
 It is not a generic config framework: each app keeps its own leaf tab type (curator:
-`url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`), validation, and the rules for how
+`url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`; flotilla: `url`), validation, and the rules for how
 window and group settings pass down to each tab.
 config-core provides the leaf-agnostic pieces:
 
@@ -19,7 +20,7 @@ config-core provides the leaf-agnostic pieces:
   `Group<T, G>`: the common keys (`title`, `width`, `height`, `colour`, `open_on_start`, `group`;
   a group's `name`, `tab`), each app's leaf tab `T`, and its own window/group extras `X`/`G`
   (`NoExtras` when it has none). Any key outside the common set goes to the extras, so an unknown
-  key is reported by name. `validate_windows` checks the shared keys (titles, sizes, colours, group names);
+  key is reported by name, inside the window, group and tab it sits in. `validate_windows` checks the shared keys (titles, sizes, colours, group names);
   `retitle_window` carries an in-place rename into a loaded config ahead of its reload.
 - **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
   fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
