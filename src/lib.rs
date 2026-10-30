@@ -39,7 +39,7 @@ pub mod roots;
 pub mod seed;
 
 pub use colour::{Colour, ColourError};
-pub use edit::{add_tab, EditError};
+pub use edit::{add_tab, set_key, EditError};
 pub use fmt::{fmt_cli, format_file, format_str};
 pub use model::{
     default_true, default_window_height, default_window_width, Density, Group, TabDigitKeys,

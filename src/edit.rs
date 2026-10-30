@@ -1,6 +1,7 @@
 //! Leaf-agnostic structural edits to a config file. Each app builds its own field list (curator:
 //! `title`/`url`/`session`/…; warden: `title`/`dir`/…) and calls `add_tab`; this module knows
-//! nothing about what the fields mean. Comment/format preserving — only the new table is added.
+//! nothing about what the fields mean. `set_key` sets one root key (an app's menu toggle writing
+//! its setting). Comment/format preserving — only the touched entry changes.
 
 use crate::io::atomic_write;
 use std::path::Path;
@@ -18,6 +19,27 @@ pub enum EditError {
     GroupNotFound(String),
     #[error("config has a `tab` entry that is not an array of tables")]
     MalformedTab,
+}
+
+/// Set root-table `key` to `v`, replacing its value or adding it above the first table. Atomic +
+/// comment-preserving. A missing file is an `Io` error: the app seeds its starter config first, so
+/// the starter's documentation is never replaced by a one-key file.
+pub fn set_key(path: &Path, key: &str, v: Value) -> Result<(), EditError> {
+    let src = std::fs::read_to_string(path)?;
+    let mut doc: DocumentMut = src.parse()?;
+    match doc.get_mut(key).and_then(Item::as_value_mut) {
+        // Keeps the entry's own decor (a trailing `# why` comment) by swapping only the value.
+        Some(old) => {
+            let decor = old.decor().clone();
+            *old = v;
+            *old.decor_mut() = decor;
+        }
+        None => {
+            doc.insert(key, value(v));
+        }
+    }
+    atomic_write(path, &doc.to_string())?;
+    Ok(())
 }
 
 /// Append a `[[window.tab]]` (group `None`) or `[[window.group.tab]]` (group `Some(name)`) table
@@ -85,6 +107,37 @@ mod tests {
         let mut f = std::fs::File::create(&p).unwrap();
         f.write_all(body.as_bytes()).unwrap();
         (dir, p)
+    }
+
+    #[test]
+    fn set_key_replaces_a_root_key_keeping_comments() {
+        let (_d, p) =
+            write_tmp("# c\ntab_digit_keys = \"jump\" # why\n\n[[window]]\ntitle = \"a\"\n");
+        set_key(&p, "tab_digit_keys", "cycle".into()).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.starts_with("# c\n"), "{out}");
+        assert!(out.contains("tab_digit_keys = \"cycle\""), "{out}");
+        assert!(out.contains("[[window]]\ntitle = \"a\""), "{out}");
+    }
+
+    #[test]
+    fn set_key_adds_a_missing_key_above_the_tables() {
+        let (_d, p) = write_tmp("title = \"x\"\n\n[[window]]\ntitle = \"a\"\n");
+        set_key(&p, "tab_digit_keys", "cycle".into()).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        let key = out.find("tab_digit_keys").expect("key written");
+        assert!(key < out.find("[[window]]").unwrap(), "{out}");
+        let t: toml::Table = toml::from_str(&out).unwrap();
+        assert_eq!(t["tab_digit_keys"].as_str(), Some("cycle"));
+    }
+
+    #[test]
+    fn set_key_on_a_missing_file_is_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        match set_key(&dir.path().join("none.toml"), "k", true.into()) {
+            Err(EditError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
