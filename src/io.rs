@@ -2,7 +2,7 @@
 //! `atomic_write` resolves symlinks so a linked config (e.g. one symlinked from a dotfiles repo) is
 //! rewritten in place, and carries the target's mode onto the temp file so `persist` doesn't leave
 //! the tempfile's owner-only 0600 default. Used by both the formatter (`fmt::format_file`) and the
-//! editor (`edit::add_tab`).
+//! editor (`edit`).
 
 use std::io::Write;
 use std::path::Path;

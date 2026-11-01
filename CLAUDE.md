@@ -32,7 +32,7 @@ Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for 
   app's own leaf schema.
 - `colour` — `Colour::parse` / `Colour::hex` for accent colours.
 - `edit` — `add_tab` plus `add_window`/`edit_window`/`add_group`/`remove`/`set_field`/`move_tab` (addressed by `At`)
-  and `set_key`/`remove_key` (one root key): comment-preserving, re-reading the file per call.
+  and `set_key`/`remove_key` (one root key), `toggle_tab_digit_keys`: comment-preserving, re-reading the file per call.
   Every app's window form writes through `add_window`/`edit_window`/`remove`. `toml_edit` is re-exported (`config_core::toml_edit`) so a
   consumer can name the field-value type without pinning its own `toml_edit`, which would risk a
   version skew against this crate's API.
