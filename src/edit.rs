@@ -25,6 +25,8 @@ pub enum EditError {
     TabNotFound(String),
     #[error("a window titled {0:?} already exists")]
     WindowExists(String),
+    #[error("a window title cannot be empty")]
+    EmptyTitle,
     #[error("{0}")]
     BadColour(#[from] crate::ColourError),
     #[error("config has a `{0}` entry that is not an array of tables")]
@@ -282,10 +284,13 @@ pub fn add_tab(
 }
 
 /// Append a `[[window]]` titled `title` (trimmed), with `colour` when given. Errors
-/// `WindowExists` when the title is already taken, `BadColour` for a colour
-/// [`Colour::parse`](crate::Colour::parse) refuses.
+/// `EmptyTitle` for a blank title, `WindowExists` when the title is already taken, `BadColour`
+/// for a colour [`Colour::parse`](crate::Colour::parse) refuses.
 pub fn add_window(path: &Path, title: &str, colour: Option<&str>) -> Result<(), EditError> {
     let title = title.trim();
+    if title.is_empty() {
+        return Err(EditError::EmptyTitle);
+    }
     colour.map(crate::Colour::parse).transpose()?;
     let mut doc = load(path)?;
     if window_index(&doc, title).is_ok() {
@@ -322,11 +327,6 @@ pub fn edit_window(
     }
     colour.flatten().map(crate::Colour::parse).transpose()?;
     let mut doc = load(path)?;
-    if let Some(new) = new_title.map(str::trim) {
-        if window_index(&doc, new).is_ok_and(|i| window_index(&doc, title).ok() != Some(i)) {
-            return Err(EditError::WindowExists(new.to_string()));
-        }
-    }
     if let Some(colour) = colour {
         apply_field(&mut doc, at, "colour", colour.map(Value::from))?;
     }
@@ -383,7 +383,8 @@ pub fn remove(path: &Path, at: At) -> Result<(), EditError> {
 }
 
 /// Set `key` on the addressed table (tab, else group, else window); `None` removes it. An existing
-/// value keeps its surrounding whitespace and inline comment. Setting a window's `title` renames it.
+/// value keeps its surrounding whitespace and inline comment. Setting a window's `title` renames it,
+/// refused with `EmptyTitle` or `WindowExists` as [`add_window`] refuses.
 pub fn set_field(path: &Path, at: At, key: &str, new: Option<Value>) -> Result<(), EditError> {
     let mut doc = load(path)?;
     apply_field(&mut doc, at, key, new)?;
@@ -397,6 +398,24 @@ fn apply_field(
     key: &str,
     new: Option<Value>,
 ) -> Result<(), EditError> {
+    // A window's title is its address: every rename path is checked here, so none writes a
+    // config validate_windows would refuse.
+    let new = if at.group.is_none() && at.tab.is_none() && key == "title" {
+        let title = new
+            .as_ref()
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("");
+        if title.is_empty() {
+            return Err(EditError::EmptyTitle);
+        }
+        if window_index(doc, title).is_ok_and(|i| window_index(doc, at.window).ok() != Some(i)) {
+            return Err(EditError::WindowExists(title.to_string()));
+        }
+        Some(Value::from(title))
+    } else {
+        new
+    };
     let target: &mut Table = match (at.group, at.tab) {
         (g, Some((k, v))) => {
             let owner = tab_owner_mut(doc, at.window, g)?;
@@ -894,6 +913,43 @@ mod tests {
         let out = std::fs::read_to_string(&p).unwrap();
         assert!(out.contains("title = \"Renamed\" # inline"));
         assert!(add_tab(&p, "Renamed", None, &[("title", "X".into())]).is_ok());
+    }
+
+    #[test]
+    fn set_field_refuses_a_taken_or_empty_window_title() {
+        let (_d, p) = write_tmp(SAMPLE);
+        let before = std::fs::read_to_string(&p).unwrap();
+        let comms = at("Comms", None, None);
+        assert!(matches!(
+            set_field(&p, comms, "title", Some(" Second ".into())),
+            Err(EditError::WindowExists(t)) if t == "Second"
+        ));
+        assert!(matches!(
+            set_field(&p, comms, "title", Some("  ".into())),
+            Err(EditError::EmptyTitle)
+        ));
+        assert!(matches!(
+            set_field(&p, comms, "title", None),
+            Err(EditError::EmptyTitle)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            before,
+            "nothing written"
+        );
+    }
+
+    #[test]
+    fn add_and_edit_window_refuse_an_empty_title() {
+        let (_d, p) = write_tmp(SAMPLE);
+        assert!(matches!(
+            add_window(&p, "  ", None),
+            Err(EditError::EmptyTitle)
+        ));
+        assert!(matches!(
+            edit_window(&p, "Comms", Some(""), None),
+            Err(EditError::EmptyTitle)
+        ));
     }
 
     #[test]
