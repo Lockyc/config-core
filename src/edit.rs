@@ -21,6 +21,8 @@ pub enum EditError {
     WindowNotFound(String),
     #[error("window has no group named {0:?}")]
     GroupNotFound(String),
+    #[error("window has no root named {0:?}")]
+    RootNotFound(String),
     #[error("no tab with that key/value: {0}")]
     TabNotFound(String),
     #[error("a window titled {0:?} already exists")]
@@ -416,18 +418,7 @@ fn apply_field(
     } else {
         new
     };
-    let target: &mut Table = match (at.group, at.tab) {
-        (g, Some((k, v))) => {
-            let owner = tab_owner_mut(doc, at.window, g)?;
-            let i = tab_index(owner, k, v)?;
-            owner["tab"]
-                .as_array_of_tables_mut()
-                .and_then(|a| a.get_mut(i))
-                .expect("checked")
-        }
-        (Some(g), None) => group_mut(window_mut(doc, at.window)?, g)?,
-        (None, None) => window_mut(doc, at.window)?,
-    };
+    let target = target_mut(doc, at)?;
     match new {
         None => {
             target.remove(key);
@@ -440,6 +431,130 @@ fn apply_field(
         }
     }
     Ok(())
+}
+
+/// The table `at` addresses: the tab, else the group, else the window.
+fn target_mut<'d>(doc: &'d mut DocumentMut, at: At) -> Result<&'d mut Table, EditError> {
+    Ok(match (at.group, at.tab) {
+        (g, Some((k, v))) => {
+            let owner = tab_owner_mut(doc, at.window, g)?;
+            let i = tab_index(owner, k, v)?;
+            owner["tab"]
+                .as_array_of_tables_mut()
+                .and_then(|a| a.get_mut(i))
+                .expect("checked")
+        }
+        (Some(g), None) => group_mut(window_mut(doc, at.window)?, g)?,
+        (None, None) => window_mut(doc, at.window)?,
+    })
+}
+
+/// Set the nested key `keys` (e.g. `["split", "size"]`) under the table `at` addresses; `None`
+/// removes the leaf and then every intermediate table left empty. Missing intermediates are
+/// written as standard tables (`[window.group.tab.split]`); an intermediate holding a non-table
+/// value (`split = true`) is replaced by a table.
+pub fn set_path(path: &Path, at: At, keys: &[&str], new: Option<Value>) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    set_nested(target_mut(&mut doc, at)?, keys, new);
+    save(path, &doc)
+}
+
+/// Address of a `[[window.root.tab]]` entry: the window by `title`, its root by `name`, the entry
+/// by its `dir` string (all trimmed matches).
+#[derive(Debug, Clone, Copy)]
+pub struct RootAt<'a> {
+    pub window: &'a str,
+    pub root: &'a str,
+    pub dir: &'a str,
+}
+
+/// [`set_path`] on the `[[window.root.tab]]` whose `dir` matches. The entry is created (`dir`
+/// written as given) when absent and removed when a removal leaves it holding only `dir`.
+pub fn set_root_tab_path(
+    path: &Path,
+    at: RootAt,
+    keys: &[&str],
+    new: Option<Value>,
+) -> Result<(), EditError> {
+    let mut doc = load(path)?;
+    let win = window_mut(&mut doc, at.window)?;
+    let root = win
+        .get_mut("root")
+        .map(|i| {
+            i.as_array_of_tables_mut()
+                .ok_or(EditError::Malformed("root"))
+        })
+        .transpose()?
+        .and_then(|rs| rs.iter_mut().find(|t| matches_trimmed(t, "name", at.root)))
+        .ok_or_else(|| EditError::RootNotFound(at.root.to_string()))?;
+    let found = match root.get("tab") {
+        None => None,
+        Some(item) => item
+            .as_array_of_tables()
+            .ok_or(EditError::Malformed("tab"))?
+            .iter()
+            .position(|t| matches_trimmed(t, "dir", at.dir)),
+    };
+    if found.is_none() && new.is_none() {
+        return Ok(());
+    }
+    let tabs = tabs_or_create(root)?;
+    let i = found.unwrap_or_else(|| {
+        let mut t = Table::new();
+        t.insert("dir", value(at.dir));
+        tabs.push(t);
+        tabs.len() - 1
+    });
+    set_nested(tabs.get_mut(i).expect("index just found"), keys, new);
+    if tabs
+        .get(i)
+        .is_some_and(|t| t.len() == 1 && t.contains_key("dir"))
+    {
+        tabs.remove(i);
+    }
+    if tabs.is_empty() {
+        root.remove("tab");
+    }
+    save(path, &doc)
+}
+
+/// Set (or, with `None`, remove and prune) `keys` below `table`.
+fn set_nested(table: &mut Table, keys: &[&str], new: Option<Value>) {
+    let Some((first, rest)) = keys.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        match new {
+            None => {
+                table.remove(first);
+            }
+            Some(mut v) => {
+                if let Some(old) = table.get(first).and_then(Item::as_value) {
+                    *v.decor_mut() = old.decor().clone();
+                }
+                table.insert(first, Item::Value(v));
+            }
+        }
+        return;
+    }
+    match table.get_mut(first) {
+        Some(Item::Table(_)) => {}
+        Some(Item::Value(Value::InlineTable(_))) => {
+            let Some(Item::Value(Value::InlineTable(t))) = table.remove(first) else {
+                unreachable!("matched above")
+            };
+            table.insert(first, Item::Table(t.into_table()));
+        }
+        _ if new.is_none() => return,
+        _ => {
+            table.insert(first, Item::Table(Table::new()));
+        }
+    }
+    let child = table[*first].as_table_mut().expect("table just ensured");
+    set_nested(child, rest, new);
+    if child.is_empty() {
+        table.remove(first);
+    }
 }
 
 /// Move the tab addressed by `from` to the end of the named window's group `to_group` (`None`: the
@@ -904,6 +1019,190 @@ mod tests {
             parse(&p)["window"][0]["group"][0]["collapsed"].as_bool(),
             Some(true)
         );
+    }
+
+    #[test]
+    fn set_path_creates_standard_subtable() {
+        let (_d, p) = write_tmp(SAMPLE);
+        set_path(
+            &p,
+            at("Comms", Some("Chat"), Some(("title", "C"))),
+            &["split", "size"],
+            Some(0.25.into()),
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            out.contains(
+                "[[window.group.tab]]\ntitle = \"C\"\nurl = \"https://c.test/\"\n\n[window.group.tab.split]\nsize = 0.25\n"
+            ),
+            "{out}"
+        );
+        assert!(!out.contains("split = {"), "{out}");
+        assert_eq!(
+            parse(&p)["window"][0]["group"][0]["tab"][0]["split"]["size"].as_float(),
+            Some(0.25)
+        );
+    }
+
+    #[test]
+    fn set_path_replaces_bool_with_table() {
+        let (_d, p) =
+            write_tmp("[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\nsplit = true\n");
+        set_path(
+            &p,
+            at("W", None, Some(("title", "A"))),
+            &["split", "size"],
+            Some(0.4.into()),
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(!out.contains("split = true"), "{out}");
+        assert!(out.contains("[window.tab.split]\nsize = 0.4"), "{out}");
+    }
+
+    #[test]
+    fn set_path_none_prunes_empty_table() {
+        let (_d, p) = write_tmp(
+            "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\n\n[window.tab.split]\nsize = 0.4\n",
+        );
+        set_path(
+            &p,
+            at("W", None, Some(("title", "A"))),
+            &["split", "size"],
+            None,
+        )
+        .unwrap();
+        let doc = parse(&p);
+        assert!(doc["window"][0]["tab"][0].get("split").is_none());
+        assert_eq!(doc["window"][0]["tab"][0]["title"].as_str(), Some("A"));
+        // A sibling key keeps the table.
+        let (_d2, p2) = write_tmp(
+            "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\n\n[window.tab.split]\nsize = 0.4\nside = \"right\"\n",
+        );
+        set_path(
+            &p2,
+            at("W", None, Some(("title", "A"))),
+            &["split", "size"],
+            None,
+        )
+        .unwrap();
+        let t = &parse(&p2)["window"][0]["tab"][0]["split"];
+        assert!(t.get("size").is_none());
+        assert_eq!(t["side"].as_str(), Some("right"));
+    }
+
+    #[test]
+    fn set_path_keeps_comments() {
+        let body = "# top\n[[window]]\ntitle = \"W\" # w\n\n# the tab\n[[window.tab]]\ntitle = \"A\" # a\n\n# next\n[[window.tab]]\ntitle = \"B\"\n";
+        let (_d, p) = write_tmp(body);
+        set_path(
+            &p,
+            at("W", None, Some(("title", "A"))),
+            &["split"],
+            Some(true.into()),
+        )
+        .unwrap();
+        set_path(
+            &p,
+            at("W", None, Some(("title", "A"))),
+            &["split", "size"],
+            Some(0.3.into()),
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        for c in [
+            "# top\n",
+            "title = \"W\" # w",
+            "# the tab\n",
+            "title = \"A\" # a",
+            "# next\n",
+        ] {
+            assert!(out.contains(c), "{c:?} lost: {out}");
+        }
+        set_path(
+            &p,
+            at("W", None, Some(("title", "A"))),
+            &["split", "size"],
+            None,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+    }
+
+    const ROOTED: &str = "# top\n[[window]]\ntitle = \"W\"\n\n[[window.root]]\nname = \"Code\"\ndir = \"~/code\"\n\n# next window\n[[window]]\ntitle = \"Other\"\n";
+
+    fn root_at<'a>(root: &'a str, dir: &'a str) -> RootAt<'a> {
+        RootAt {
+            window: "W",
+            root,
+            dir,
+        }
+    }
+
+    #[test]
+    fn set_root_tab_path_creates_entry() {
+        let (_d, p) = write_tmp(ROOTED);
+        set_root_tab_path(
+            &p,
+            root_at("Code", "~/code/x"),
+            &["split"],
+            Some(true.into()),
+        )
+        .unwrap();
+        set_root_tab_path(
+            &p,
+            root_at("Code", " ~/code/x "),
+            &["split", "size"],
+            Some(0.25.into()),
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            out.contains(
+                "[[window.root.tab]]\ndir = \"~/code/x\"\n\n[window.root.tab.split]\nsize = 0.25\n"
+            ),
+            "{out}"
+        );
+        assert_eq!(
+            parse(&p)["window"][0]["root"][0]["tab"]
+                .as_array_of_tables()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            out.contains("# next window\n[[window]]\ntitle = \"Other\""),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn set_root_tab_path_prunes_dir_only_entry() {
+        let (_d, p) = write_tmp(ROOTED);
+        set_root_tab_path(
+            &p,
+            root_at("Code", "~/code/x"),
+            &["split", "size"],
+            Some(0.25.into()),
+        )
+        .unwrap();
+        set_root_tab_path(&p, root_at("Code", "~/code/x"), &["split", "size"], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), ROOTED);
+    }
+
+    #[test]
+    fn set_root_tab_path_unknown_root_errs() {
+        let (_d, p) = write_tmp(ROOTED);
+        let err = set_root_tab_path(
+            &p,
+            root_at("Nope", "~/code/x"),
+            &["split"],
+            Some(true.into()),
+        )
+        .unwrap_err();
+        assert!(matches!(err, EditError::RootNotFound(_)));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), ROOTED);
     }
 
     #[test]
