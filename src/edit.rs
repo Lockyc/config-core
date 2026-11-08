@@ -9,7 +9,7 @@
 use crate::io::atomic_write;
 use crate::model::TabDigitKeys;
 use std::path::Path;
-use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table, Value};
+use toml_edit::{value, ArrayOfTables, Decor, DocumentMut, InlineTable, Item, Table, Value};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditError {
@@ -540,10 +540,15 @@ fn set_nested(table: &mut Table, keys: &[&str], new: Option<Value>) {
     match table.get_mut(first) {
         Some(Item::Table(_)) => {}
         Some(Item::Value(Value::InlineTable(_))) => {
-            let Some(Item::Value(Value::InlineTable(t))) = table.remove(first) else {
+            // A user's inline table is edited where it stands, keeping its position and comment.
+            let Some(Item::Value(Value::InlineTable(t))) = table.get_mut(first) else {
                 unreachable!("matched above")
             };
-            table.insert(first, Item::Table(t.into_table()));
+            set_inline(t, rest, new);
+            if t.is_empty() && !has_comment(t.decor()) {
+                table.remove(first);
+            }
+            return;
         }
         _ if new.is_none() => return,
         _ => {
@@ -552,9 +557,51 @@ fn set_nested(table: &mut Table, keys: &[&str], new: Option<Value>) {
     }
     let child = table[*first].as_table_mut().expect("table just ensured");
     set_nested(child, rest, new);
-    if child.is_empty() {
+    if child.is_empty() && !has_comment(child.decor()) {
         table.remove(first);
     }
+}
+
+/// [`set_nested`] below an inline table, staying inline all the way down.
+fn set_inline(table: &mut InlineTable, keys: &[&str], new: Option<Value>) {
+    let Some((first, rest)) = keys.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        match new {
+            None => {
+                table.remove(first);
+            }
+            Some(mut v) => {
+                if let Some(old) = table.get(first) {
+                    *v.decor_mut() = old.decor().clone();
+                }
+                table.insert(*first, v);
+            }
+        }
+        return;
+    }
+    if !matches!(table.get(first), Some(Value::InlineTable(_))) {
+        if new.is_none() {
+            return;
+        }
+        table.insert(*first, Value::InlineTable(InlineTable::new()));
+    }
+    let Some(Value::InlineTable(child)) = table.get_mut(first) else {
+        unreachable!("inline table just ensured")
+    };
+    set_inline(child, rest, new);
+    if child.is_empty() && !has_comment(child.decor()) {
+        table.remove(first);
+    }
+}
+
+/// Whether a decor holds comment text, which pruning must not delete with its table.
+fn has_comment(decor: &Decor) -> bool {
+    [decor.prefix(), decor.suffix()]
+        .into_iter()
+        .flatten()
+        .any(|r| r.as_str().is_some_and(|s| s.contains('#')))
 }
 
 /// Move the tab addressed by `from` to the end of the named window's group `to_group` (`None`: the
@@ -1128,6 +1175,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+    }
+
+    #[test]
+    fn set_path_edits_an_inline_table_in_place() {
+        let body = "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\nsplit = { size = 0.3 } # c\ntitle = \"A\"\n";
+        let (_d, p) = write_tmp(body);
+        let a = at("W", None, Some(("title", "A")));
+        set_path(&p, a, &["split", "size"], Some(0.5.into())).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            body.replace("0.3", "0.5")
+        );
+        set_path(&p, a, &["split", "size"], None).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.contains("split = {} # c\ntitle = \"A\""), "{out}");
+        // Deeper path through nested inline tables.
+        let (_d2, p2) = write_tmp(
+            "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\nx = { y = { z = 1 } }\n",
+        );
+        set_path(&p2, a, &["x", "y", "z"], Some(2.into())).unwrap();
+        let out = std::fs::read_to_string(&p2).unwrap();
+        assert!(out.contains("x = { y = { z = 2 } }"), "{out}");
+        set_path(&p2, a, &["x", "y", "z"], None).unwrap();
+        assert!(!std::fs::read_to_string(&p2).unwrap().contains("x ="));
+    }
+
+    #[test]
+    fn set_path_prune_keeps_a_commented_table() {
+        let (_d, p) = write_tmp(
+            "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\n\n# note\n[window.tab.split]\nsize = 0.4\n",
+        );
+        let a = at("W", None, Some(("title", "A")));
+        set_path(&p, a, &["split", "size"], None).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.contains("# note\n[window.tab.split]"), "{out}");
+        set_path(&p, a, &["split", "size"], Some(0.2.into())).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            out.contains("# note\n[window.tab.split]\nsize = 0.2"),
+            "{out}"
+        );
     }
 
     const ROOTED: &str = "# top\n[[window]]\ntitle = \"W\"\n\n[[window.root]]\nname = \"Code\"\ndir = \"~/code\"\n\n# next window\n[[window]]\ntitle = \"Other\"\n";
