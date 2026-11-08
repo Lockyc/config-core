@@ -452,19 +452,21 @@ fn target_mut<'d>(doc: &'d mut DocumentMut, at: At) -> Result<&'d mut Table, Edi
 /// Set the nested key `keys` (e.g. `["split", "size"]`) under the table `at` addresses; `None`
 /// removes the leaf and then every intermediate table left empty. Missing intermediates are
 /// written as standard tables (`[window.group.tab.split]`); an intermediate holding a non-table
-/// value (`split = true`) is replaced by a table.
+/// value (`split = true`) is replaced by a table. A comment attached to a removed key goes with
+/// that key; a comment on the table itself keeps the table.
 pub fn set_path(path: &Path, at: At, keys: &[&str], new: Option<Value>) -> Result<(), EditError> {
     let mut doc = load(path)?;
     set_nested(target_mut(&mut doc, at)?, keys, new);
     save(path, &doc)
 }
 
-/// Address of a `[[window.root.tab]]` entry: the window by `title`, its root by `name`, the entry
-/// by its `dir` string (all trimmed matches).
+/// Address of a `[[window.root.tab]]` entry: the window by `title`, its root by the `dir` string
+/// the file gives it (a root's `name` is optional, its `dir` never is), the entry by its own `dir`
+/// string (all trimmed matches).
 #[derive(Debug, Clone, Copy)]
 pub struct RootAt<'a> {
     pub window: &'a str,
-    pub root: &'a str,
+    pub root_dir: &'a str,
     pub dir: &'a str,
 }
 
@@ -485,8 +487,11 @@ pub fn set_root_tab_path(
                 .ok_or(EditError::Malformed("root"))
         })
         .transpose()?
-        .and_then(|rs| rs.iter_mut().find(|t| matches_trimmed(t, "name", at.root)))
-        .ok_or_else(|| EditError::RootNotFound(at.root.to_string()))?;
+        .and_then(|rs| {
+            rs.iter_mut()
+                .find(|t| matches_trimmed(t, "dir", at.root_dir))
+        })
+        .ok_or_else(|| EditError::RootNotFound(at.root_dir.to_string()))?;
     let found = match root.get("tab") {
         None => None,
         Some(item) => item
@@ -545,7 +550,13 @@ fn set_nested(table: &mut Table, keys: &[&str], new: Option<Value>) {
                 unreachable!("matched above")
             };
             set_inline(t, rest, new);
-            if t.is_empty() && !has_comment(t.decor()) {
+            // A comment above `split = { … }` is the key's own decor, not the value's.
+            let emptied = t.is_empty() && !has_comment(t.decor());
+            if emptied
+                && !table
+                    .key(first)
+                    .is_some_and(|k| has_comment(k.leaf_decor()))
+            {
                 table.remove(first);
             }
             return;
@@ -1220,12 +1231,48 @@ mod tests {
 
     const ROOTED: &str = "# top\n[[window]]\ntitle = \"W\"\n\n[[window.root]]\nname = \"Code\"\ndir = \"~/code\"\n\n# next window\n[[window]]\ntitle = \"Other\"\n";
 
-    fn root_at<'a>(root: &'a str, dir: &'a str) -> RootAt<'a> {
+    fn root_at<'a>(root_dir: &'a str, dir: &'a str) -> RootAt<'a> {
         RootAt {
             window: "W",
-            root,
+            root_dir,
             dir,
         }
+    }
+
+    #[test]
+    fn set_root_tab_path_addresses_an_unnamed_root_by_dir() {
+        let (_d, p) = write_tmp("[[window]]\ntitle = \"W\"\n\n[[window.root]]\ndir = \"~/code\"\n");
+        set_root_tab_path(
+            &p,
+            root_at(" ~/code ", "~/code/x"),
+            &["split"],
+            Some(true.into()),
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            out.contains("[[window.root.tab]]\ndir = \"~/code/x\""),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn set_path_keeps_a_comment_above_an_emptied_inline_table_key() {
+        let src = "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ndir = \"/a\"\n# keep me\nsplit = { size = 0.3 }\n";
+        let (_d, p) = write_tmp(src);
+        set_path(
+            &p,
+            At {
+                window: "W",
+                group: None,
+                tab: Some(("dir", "/a")),
+            },
+            &["split", "size"],
+            None,
+        )
+        .unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.contains("# keep me"), "{out}");
     }
 
     #[test]
@@ -1233,14 +1280,14 @@ mod tests {
         let (_d, p) = write_tmp(ROOTED);
         set_root_tab_path(
             &p,
-            root_at("Code", "~/code/x"),
+            root_at("~/code", "~/code/x"),
             &["split"],
             Some(true.into()),
         )
         .unwrap();
         set_root_tab_path(
             &p,
-            root_at("Code", " ~/code/x "),
+            root_at("~/code", " ~/code/x "),
             &["split", "size"],
             Some(0.25.into()),
         )
@@ -1270,12 +1317,12 @@ mod tests {
         let (_d, p) = write_tmp(ROOTED);
         set_root_tab_path(
             &p,
-            root_at("Code", "~/code/x"),
+            root_at("~/code", "~/code/x"),
             &["split", "size"],
             Some(0.25.into()),
         )
         .unwrap();
-        set_root_tab_path(&p, root_at("Code", "~/code/x"), &["split", "size"], None).unwrap();
+        set_root_tab_path(&p, root_at("~/code", "~/code/x"), &["split", "size"], None).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), ROOTED);
     }
 
@@ -1284,7 +1331,7 @@ mod tests {
         let (_d, p) = write_tmp(ROOTED);
         let err = set_root_tab_path(
             &p,
-            root_at("Nope", "~/code/x"),
+            root_at("~/nope", "~/code/x"),
             &["split"],
             Some(true.into()),
         )
