@@ -21,7 +21,7 @@ pub enum EditError {
     WindowNotFound(String),
     #[error("window has no group named {0:?}")]
     GroupNotFound(String),
-    #[error("window has no root named {0:?}")]
+    #[error("window has no root with dir {0:?}")]
     RootNotFound(String),
     #[error("no tab with that key/value: {0}")]
     TabNotFound(String),
@@ -471,7 +471,8 @@ pub struct RootAt<'a> {
 }
 
 /// [`set_path`] on the `[[window.root.tab]]` whose `dir` matches. The entry is created (`dir`
-/// written as given) when absent and removed when a removal leaves it holding only `dir`.
+/// written as given) when absent and removed when a removal leaves it holding only `dir`, unless
+/// a comment sits on it.
 pub fn set_root_tab_path(
     path: &Path,
     at: RootAt,
@@ -513,7 +514,7 @@ pub fn set_root_tab_path(
     set_nested(tabs.get_mut(i).expect("index just found"), keys, new);
     if tabs
         .get(i)
-        .is_some_and(|t| t.len() == 1 && t.contains_key("dir"))
+        .is_some_and(|t| t.len() == 1 && t.contains_key("dir") && !has_comment(t.decor()))
     {
         tabs.remove(i);
     }
@@ -1324,6 +1325,19 @@ mod tests {
         .unwrap();
         set_root_tab_path(&p, root_at("~/code", "~/code/x"), &["split", "size"], None).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), ROOTED);
+    }
+
+    #[test]
+    fn set_root_tab_path_keeps_a_commented_entry_left_holding_only_dir() {
+        let text = "[[window]]\ntitle = \"W\"\n\n[[window.root]]\ndir = \"~/code\"\n\n# keep x split wide\n[[window.root.tab]]\ndir = \"~/code/x\"\nsplit = { size = 0.7 }\n";
+        let (_d, p) = write_tmp(text);
+        set_root_tab_path(&p, root_at("~/code", "~/code/x"), &["split", "size"], None).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(
+            out.contains("# keep x split wide\n[[window.root.tab]]\ndir = \"~/code/x\"\n"),
+            "{out}"
+        );
+        assert!(!out.contains("size"), "{out}");
     }
 
     #[test]
