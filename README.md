@@ -1,68 +1,103 @@
 # config-core
 
-![Built with Rust](https://img.shields.io/badge/built%20with-Rust-CE412B?logo=rust&logoColor=white)
-[![License](https://img.shields.io/github/license/Lockyc/config-core)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-macOS-555)
+![Rust](https://img.shields.io/badge/rust-CE412B?logo=rust&logoColor=white)
+[![License](https://img.shields.io/github/license/lockyc/config-core)](LICENSE)
 
-Shared TOML config primitives for the [curator](https://github.com/Lockyc/curator),
-[warden](https://github.com/Lockyc/warden), [lector](https://github.com/Lockyc/lector) and
-[flotilla](https://github.com/Lockyc/flotilla) apps, which share the same
-`window → group → tab` config shape and house style.
+The TOML config layer four macOS apps share — [warden](https://github.com/lockyc/warden)
+(terminals), [curator](https://github.com/lockyc/curator) (browser tabs),
+[lector](https://github.com/lockyc/lector) (local doc sites) and
+[flotilla](https://github.com/lockyc/flotilla) (document workspaces): the
+`window → group → tab` shape, its validation, edits that keep your comments, and the `fmt`
+formatter behind each app's `<app> fmt`.
 
 It is not a generic config framework: each app keeps its own leaf tab type (curator:
-`url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`; flotilla: `url`), validation, and the rules for how
-window and group settings pass down to each tab.
-config-core provides the leaf-agnostic pieces:
+`url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`; flotilla: `url`), validation, and
+the rules for how window and group settings pass down to each tab.
 
-- **`model`** — the leaf-free config-model primitives: `Density` (whole-app chrome sizing),
-  `TabDigitKeys` (the ⌘1/⌘2 jump-vs-cycle keybinding mode) and the non-fatal `Warning`.
-  It also holds the shared serde defaults (`default_true`, `default_window_width`/`_height`).
-- **`window`** — the `[[window]]` / `[[window.group]]` container, `Window<T, X, G>` and
-  `Group<T, G>`: the common keys (`title`, `width`, `height`, `colour`, `open_on_start`, `group`;
-  a group's `name`, `tab`), each app's leaf tab `T`, and its own window/group extras `X`/`G`
-  (`NoExtras` when it has none). Any key outside the common set goes to the extras, so an unknown
-  key is reported by name, inside the window, group and tab it sits in. `validate_windows` checks the shared keys (titles, sizes, colours, group names);
-  `retitle_window` carries an in-place rename into a loaded config ahead of its reload.
-- **`fmt`** — a house-style TOML formatter (`format_str`, `format_file`) wrapping `taplo` with a
-  fixed style: nested-table indentation, aligned `=` and trailing comments, preserved key order,
-  a blank line between window/group tables but none between the `tab` tables nested inside them. `format_file` rewrites atomically and
-  only when bytes change, preserving symlinks and file mode. `fmt_cli` is the `fmt` CLI subcommand
-  behind `warden fmt`, `curator fmt`, and `lector fmt`.
-- **`colour`** — `#rgb` / `#rrggbb` hex parsing for the per-window accent colour (`Colour::parse`,
-  `Colour::hex`).
-- **`edit`** — leaf-agnostic structural add/remove/set/move edits of windows, groups and tabs:
-  `add_window` / `edit_window` (title and colour), `add_group`, `add_tab`, `remove`, `set_field` and
-  `move_tab` (the last three addressed by an `At`), `set_path` (a nested key like `split.size`) and
-  `set_root_tab_path` (the same on a root's `[[window.root.tab]]` entry, addressed by `RootAt`), plus `set_key` / `remove_key` (one root key) and `toggle_tab_digit_keys`. Atomic and
-  comment-preserving via `toml_edit`; groups and tabs take an ordered field list for any leaf shape. An unknown window, group or tab is an error. Field values
-  are `config_core::toml_edit::Value` (`toml_edit` is re-exported; callers need no dependency of
-  their own on it).
-- **`paths`** — config-path resolution (`resolve_config_path`, `default_config_path`). The
-  environment variable the app names (e.g. `WARDEN_CONFIG`) wins when set and non-empty; otherwise
-  the path is the default
-  (`~/.config/<app_dir>/config.toml`).
-- **`seed`** — a starter config, on request only. `write_default_config(path, template)` writes
-  `template` to `path` atomically if nothing is there yet, and never clobbers an existing file. The
-  caller supplies the template.
-- **`roots`** — project-tree discovery for a `[[window.root]]` block (warden and lector):
-  `scan_root` walks a dir for git repos, `resolve_root_dir` validates a root's `{name, dir, depth}`,
-  and `discover_projects` flattens roots into `DiscoveredProject`s the app maps onto its own tab.
+## Consumers
+
+warden, curator, lector and flotilla, each pinned to a **commit rev** (no tags, no crates.io
+releases).
 
 ## Use
 
-It's consumed as a git dependency pinned to a **commit rev** (no tags, no crates.io releases):
-
 ```toml
 [dependencies]
-config-core = { git = "https://github.com/Lockyc/config-core", rev = "<commit>" }
+config-core = { git = "https://github.com/lockyc/config-core", rev = "<commit>" }
 ```
 
-## Develop
+A config in the shared shape, with the app's own keys on its tabs:
+
+```toml
+[[window]]
+title  = "work"
+colour = "#0f8a8a"
+
+  [[window.group]]
+  name = "services"
+
+    [[window.group.tab]]
+    title = "api"
+    url   = "https://api.example.com/"
+```
+
+Load it with your leaf tab type, check the shared keys, and format it in house style:
+
+```rust
+use config_core::{format_file, resolve_config_path, validate_windows, Window};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Tab { title: String, url: String }
+
+#[derive(Deserialize)]
+struct Config { #[serde(rename = "window")] windows: Vec<Window<Tab>> }
+
+let path = resolve_config_path("MYAPP_CONFIG", "myapp");   // $MYAPP_CONFIG, else ~/.config/myapp/config.toml
+let config: Config = toml::from_str(&std::fs::read_to_string(&path)?)?;
+validate_windows(&config.windows)?;                        // titles, sizes, colours, group names
+format_file(&path)?;                                       // rewrites only when bytes change
+```
+
+A key outside the common set lands in the window's or group's extras type (`NoExtras` when an app
+has none), so an unknown key is reported by name, inside the window, group and tab it sits in.
+
+## What it provides
+
+- **`window`** — `Window<T, X, G>` / `Group<T, G>` with the common keys, `validate_windows`, and
+  `retitle_window` for a rename made in place.
+- **`edit`** — comment-preserving, atomic edits of windows, groups, tabs and keys via `toml_edit`
+  (re-exported, so callers need no dependency of their own).
+- **`fmt`** — the house-style formatter (`format_str`, `format_file`) and `fmt_cli`, the `fmt`
+  subcommand behind `warden fmt`, `curator fmt` and `lector fmt`.
+- **`roots`** — finding every git repo under a `[[window.root]]` directory (warden and lector).
+- **`paths`**, **`seed`**, **`colour`**, **`model`** — config-path resolution, a starter config
+  written only when nothing is there, `#rgb` / `#rrggbb` colours, and the shared `Density`,
+  `TabDigitKeys` and `Warning` types.
+
+Every function and its contract: the crate's rustdoc (`cargo doc --open`).
+
+## Status
+
+In use by all four apps.
+
+## Related
+
+[chrome-core](https://github.com/lockyc/chrome-core) (the sidebar) and
+[shell-core](https://github.com/lockyc/shell-core) (app shell and release tooling) are the other
+two cores the apps share.
+
+## Development
 
 ```sh
+git clone https://github.com/lockyc/config-core && cd config-core
 just gate     # cargo fmt --check, clippy -D warnings, tests
 cargo test    # the quick loop: unit + golden formatter tests
 ```
 
+Conventions: [CLAUDE.md](CLAUDE.md).
+
 ## License
 
-[MIT](LICENSE) © Lachlan Collins
+MIT — see [LICENSE](LICENSE).
