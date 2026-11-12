@@ -15,11 +15,6 @@ It is not a generic config framework: each app keeps its own leaf tab type (cura
 `url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`; flotilla: `url`), validation, and
 the rules for how window and group settings pass down to each tab.
 
-## Consumers
-
-warden, curator, lector and flotilla, each pinned to a **commit rev** (no tags, no crates.io
-releases).
-
 ## Use
 
 ```toml
@@ -80,7 +75,7 @@ Every function and its contract: the crate's rustdoc (`cargo doc --open`).
 
 ## Status
 
-In use by all four apps.
+In use by all four apps, each pinned to a commit rev; there are no tags or crates.io releases.
 
 ## Related
 
