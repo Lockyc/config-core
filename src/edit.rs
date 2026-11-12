@@ -460,8 +460,16 @@ fn target_mut<'d>(doc: &'d mut DocumentMut, at: At) -> Result<&'d mut Table, Edi
 /// `["split", "pane", "1", "size"]` is the second `[[…split.pane]]`'s `size`. An index past the
 /// end leaves the document unchanged; elements are never created.
 pub fn set_path(path: &Path, at: At, keys: &[&str], new: Option<Value>) -> Result<(), EditError> {
+    set_paths(path, at, &[(keys, new)])
+}
+
+/// [`set_path`] for each of `edits` in order, in one save: the file never holds a partial set.
+pub fn set_paths(path: &Path, at: At, edits: &[(&[&str], Option<Value>)]) -> Result<(), EditError> {
     let mut doc = load(path)?;
-    set_nested(target_mut(&mut doc, at)?, keys, new);
+    let table = target_mut(&mut doc, at)?;
+    for (keys, new) in edits {
+        set_nested(table, keys, new.clone());
+    }
     save(path, &doc)
 }
 
@@ -483,6 +491,15 @@ pub fn set_root_tab_path(
     at: RootAt,
     keys: &[&str],
     new: Option<Value>,
+) -> Result<(), EditError> {
+    set_root_tab_paths(path, at, &[(keys, new)])
+}
+
+/// [`set_root_tab_path`] for each of `edits` in order, in one save.
+pub fn set_root_tab_paths(
+    path: &Path,
+    at: RootAt,
+    edits: &[(&[&str], Option<Value>)],
 ) -> Result<(), EditError> {
     let mut doc = load(path)?;
     let win = window_mut(&mut doc, at.window)?;
@@ -506,7 +523,7 @@ pub fn set_root_tab_path(
             .iter()
             .position(|t| matches_trimmed(t, "dir", at.dir)),
     };
-    if found.is_none() && new.is_none() {
+    if found.is_none() && edits.iter().all(|(_, new)| new.is_none()) {
         return Ok(());
     }
     let tabs = tabs_or_create(root)?;
@@ -516,7 +533,10 @@ pub fn set_root_tab_path(
         tabs.push(t);
         tabs.len() - 1
     });
-    set_nested(tabs.get_mut(i).expect("index just found"), keys, new);
+    let entry = tabs.get_mut(i).expect("index just found");
+    for (keys, new) in edits {
+        set_nested(entry, keys, new.clone());
+    }
     if tabs
         .get(i)
         .is_some_and(|t| t.len() == 1 && t.contains_key("dir") && !has_comment(t.decor()))
@@ -1149,6 +1169,24 @@ mod tests {
         );
         set_path(&p, a, &["split", "pane", "1", "size"], None).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
+    }
+
+    #[test]
+    fn set_paths_applies_every_edit_in_one_save() {
+        let (_d, p) = write_tmp(THREE_PANES);
+        let a = at("W", None, Some(("title", "A")));
+        let edits: [(&[&str], Option<Value>); 3] = [
+            (&["split", "pane", "0", "size"], Some(0.5.into())),
+            (&["split", "pane", "2", "size"], Some(0.2.into())),
+            (&["split", "pane", "0", "cmd"], None),
+        ];
+        set_paths(&p, a, &edits).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            THREE_PANES
+                .replace("cmd = \"a\"\n", "size = 0.5\n")
+                .replace("cmd = \"c\"\n", "cmd = \"c\"\nsize = 0.2\n")
+        );
     }
 
     #[test]
