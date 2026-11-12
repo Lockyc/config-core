@@ -9,7 +9,7 @@ The TOML config layer four macOS apps share — [warden](https://github.com/lock
 [lector](https://github.com/lockyc/lector) (local doc sites) and
 [flotilla](https://github.com/lockyc/flotilla) (document workspaces): the
 `window → group → tab` shape, its validation, edits that keep your comments, and the `fmt`
-formatter behind each app's `<app> fmt`.
+formatter behind `warden fmt`, `curator fmt` and `lector fmt`.
 
 It is not a generic config framework: each app keeps its own leaf tab type (curator:
 `url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`; flotilla: `url`), validation, and
