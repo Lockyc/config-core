@@ -454,6 +454,11 @@ fn target_mut<'d>(doc: &'d mut DocumentMut, at: At) -> Result<&'d mut Table, Edi
 /// written as standard tables (`[window.group.tab.split]`); an intermediate holding a non-table
 /// value (`split = true`) is replaced by a table. A comment attached to a removed key goes with
 /// that key; a comment on the table itself keeps the table.
+///
+/// A segment that parses as a number, directly after a key holding an array of tables (or an
+/// inline array of inline tables) and before at least one more segment, addresses that element:
+/// `["split", "pane", "1", "size"]` is the second `[[…split.pane]]`'s `size`. An index past the
+/// end leaves the document unchanged; elements are never created.
 pub fn set_path(path: &Path, at: At, keys: &[&str], new: Option<Value>) -> Result<(), EditError> {
     let mut doc = load(path)?;
     set_nested(target_mut(&mut doc, at)?, keys, new);
@@ -543,6 +548,25 @@ fn set_nested(table: &mut Table, keys: &[&str], new: Option<Value>) {
         }
         return;
     }
+    if rest.len() > 1 {
+        if let Ok(i) = rest[0].parse::<usize>() {
+            match table.get_mut(first) {
+                Some(Item::ArrayOfTables(aot)) => {
+                    if let Some(el) = aot.get_mut(i) {
+                        set_nested(el, &rest[1..], new);
+                    }
+                    return;
+                }
+                Some(Item::Value(Value::Array(arr))) => {
+                    if let Some(Value::InlineTable(el)) = arr.get_mut(i) {
+                        set_inline(el, &rest[1..], new);
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
     match table.get_mut(first) {
         Some(Item::Table(_)) => {}
         Some(Item::Value(Value::InlineTable(_))) => {
@@ -592,6 +616,14 @@ fn set_inline(table: &mut InlineTable, keys: &[&str], new: Option<Value>) {
             }
         }
         return;
+    }
+    if rest.len() > 1 {
+        if let (Ok(i), Some(Value::Array(arr))) = (rest[0].parse::<usize>(), table.get_mut(first)) {
+            if let Some(Value::InlineTable(el)) = arr.get_mut(i) {
+                set_inline(el, &rest[1..], new);
+            }
+            return;
+        }
     }
     if !matches!(table.get(first), Some(Value::InlineTable(_))) {
         if new.is_none() {
@@ -1102,6 +1134,56 @@ mod tests {
             parse(&p)["window"][0]["group"][0]["tab"][0]["split"]["size"].as_float(),
             Some(0.25)
         );
+    }
+
+    const THREE_PANES: &str = "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\n\n[[window.tab.split.pane]]\ncmd = \"a\"\n\n# second\n[[window.tab.split.pane]]\ncmd = \"b\"\n\n[[window.tab.split.pane]]\ncmd = \"c\"\n";
+
+    #[test]
+    fn set_path_indexes_an_array_of_tables() {
+        let (_d, p) = write_tmp(THREE_PANES);
+        let a = at("W", None, Some(("title", "A")));
+        set_path(&p, a, &["split", "pane", "1", "size"], Some(0.25.into())).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            THREE_PANES.replace("cmd = \"b\"\n", "cmd = \"b\"\nsize = 0.25\n")
+        );
+        set_path(&p, a, &["split", "pane", "1", "size"], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
+    }
+
+    #[test]
+    fn set_path_indexes_an_inline_array() {
+        let body = "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\nsplit = { pane = [{cmd = \"a\"}, {cmd = \"b\"}] }\n";
+        let (_d, p) = write_tmp(body);
+        let a = at("W", None, Some(("title", "A")));
+        set_path(&p, a, &["split", "pane", "1", "size"], Some(0.25.into())).unwrap();
+        let out = std::fs::read_to_string(&p).unwrap();
+        assert!(out.contains("{cmd = \"a\"}"), "{out}");
+        let doc = parse(&p);
+        let panes = &doc["window"][0]["tab"][0]["split"]["pane"];
+        assert!(panes[0].get("size").is_none(), "{out}");
+        assert_eq!(panes[1]["size"].as_float(), Some(0.25), "{out}");
+        // A bare inline array of inline tables on the tab itself.
+        let (_d2, p2) = write_tmp(
+            "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\npane = [{cmd = \"a\"}, {cmd = \"b\"}]\n",
+        );
+        set_path(&p2, a, &["pane", "1", "size"], Some(0.5.into())).unwrap();
+        let doc = parse(&p2);
+        assert_eq!(
+            doc["window"][0]["tab"][0]["pane"][1]["size"].as_float(),
+            Some(0.5)
+        );
+    }
+
+    #[test]
+    fn set_path_out_of_range_index_is_a_no_op() {
+        let (_d, p) = write_tmp(THREE_PANES);
+        let a = at("W", None, Some(("title", "A")));
+        set_path(&p, a, &["split", "pane", "5", "size"], Some(0.25.into())).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
+        // Removal through an out-of-range index is equally a no-op.
+        set_path(&p, a, &["split", "pane", "5", "size"], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
     }
 
     #[test]
