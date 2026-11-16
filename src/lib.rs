@@ -33,6 +33,8 @@
 //! - [`roots`] — leaf-free project-tree discovery shared by warden + lector: [`scan_root`] walks a
 //!   dir for git repos, [`resolve_root_dir`] validates a `[[window.root]]`'s `{name,dir,depth}`,
 //!   and [`discover_projects`] flattens roots into [`DiscoveredProject`]s the app maps onto its tab.
+//! - [`session`] — the login-session cascade (tab → group → window → app → [`DEFAULT_SESSION`])
+//!   shared by curator and flotilla: [`session::resolve`] over the levels the app reads.
 pub mod colour;
 pub mod edit;
 pub mod fmt;
@@ -41,6 +43,7 @@ pub mod model;
 pub mod paths;
 pub mod roots;
 pub mod seed;
+pub mod session;
 pub mod window;
 
 pub use colour::{Colour, ColourError};
@@ -58,6 +61,7 @@ pub use roots::{
     DiscoveredProject, RootDir, RootError, DEFAULT_ROOT_DEPTH,
 };
 pub use seed::{write_default_config, SeedError};
+pub use session::DEFAULT_SESSION;
 pub use window::{retitle_window, validate_windows, Group, NoExtras, Window, WindowError};
 
 // Re-exported so consumers can name the field-value type `add_tab` takes

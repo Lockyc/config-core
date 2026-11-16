@@ -18,7 +18,7 @@ knowledge of any app's leaf tab fields.
 
 ## Scope — deliberately narrow
 
-Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for its behaviour.
+Nine modules, all leaf-agnostic. Each module's docblocks carry the reasons for its behaviour.
 
 - `model` — leaf-free model primitives (`Density`, `TabDigitKeys`, `Warning`, shared serde
   defaults). curator, warden and lector re-export them.
@@ -41,6 +41,9 @@ Eight modules, all leaf-agnostic. Each module's docblocks carry the reasons for 
   only in the env-var name and `~/.config` subdirectory passed in.
 - `seed` — `write_default_config`: an atomic, never-clobbering starter config, written only when
   the user asks (shell-core's home surface). The template is the caller's.
+- `session` — the login-session cascade (`resolve`, `DEFAULT_SESSION`): a tab opens in the most
+  specific of tab → group → window → app that sets `session`. curator and flotilla resolve every
+  tab through it; the `session` keys stay in each app's leaf and extras.
 
 `paths` and `seed` are filesystem primitives rather than TOML-content ones, and qualify on the same
 test as everything else here: identical and leaf-free in every app.
