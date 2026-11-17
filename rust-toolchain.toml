@@ -7,5 +7,5 @@
 # apps, so this pin does NOT reach them automatically — it governs only standalone
 # config-core development; the consumers compile config-core with their own pin.
 [toolchain]
-channel = "1.96.0"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
