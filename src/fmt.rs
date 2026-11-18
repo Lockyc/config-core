@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn keeps_a_line_under_100_columns_whole() {
-        let items = vec!["\"abcdefgh\""; 7].join(", ");
+        let items = ["\"abcdefgh\""; 7].join(", ");
         let input = format!("args = [{items}]\n");
         assert!(input.len() > 80 && input.len() < 100);
         assert_eq!(format_str(&input), input);
