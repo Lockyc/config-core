@@ -247,8 +247,7 @@ fn insert_first_key(src: &str, line: &str) -> String {
         if src.trim().is_empty() {
             return line.to_string();
         }
-        let sep = if src.ends_with('\n') { "\n" } else { "\n\n" };
-        return format!("{src}{sep}{line}");
+        return format!("{}\n\n{line}", src.trim_end_matches('\n'));
     };
     let head = &lines[..first_table];
     let split = head
@@ -809,6 +808,8 @@ mod tests {
         let cases = [
             // Comments only.
             ("# header\n# more\n", "# header\n# more\n\nk = 1\n"),
+            // Comments only, ending in a blank line.
+            ("# header\n\n", "# header\n\nk = 1\n"),
             // An implicit first table.
             (
                 "# header\n\n[window.a]\nx = 1\n",
