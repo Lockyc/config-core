@@ -1686,3 +1686,7 @@ mod tests {
         assert_eq!(doc["window"][1]["group"][1]["name"].as_str(), Some("G4"));
     }
 }
+
+#[cfg(test)]
+#[path = "edit_machine.rs"]
+mod machine;

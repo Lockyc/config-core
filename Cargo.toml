@@ -28,3 +28,8 @@ toml_edit = "0.25"
 # Window/Group deserialize via a `toml::Table` so the common keys can be split from the app's
 # extras (window.rs). The same major the apps load their configs with.
 toml = "0.8"
+
+[dev-dependencies]
+# Property and model-based tests: fmt keeps every value, the edit API against a reference model.
+proptest = "=1.12.0"
+proptest-state-machine = "=0.9.0"
