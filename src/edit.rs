@@ -148,16 +148,22 @@ pub fn remove_key(path: &Path, key: &str) -> Result<bool, EditError> {
     if doc.remove(key).is_none() {
         return Ok(false);
     }
-    let header = prefix
-        .as_deref()
-        .filter(|_| first)
-        .and_then(|p| p.rfind("\n\n").map(|i| p[..i].trim_end()))
-        .filter(|h| !h.is_empty());
-    if let Some(header) = header {
-        prepend_to_first(&mut doc, &format!("{header}\n\n"));
+    if first {
+        keep_header(&mut doc, prefix.as_deref());
     }
     save(path, &doc)?;
     Ok(true)
+}
+
+/// The file's header — the comment block in `prefix` set off by a blank line, which rode on an
+/// item just removed from the top of `doc` — put back in front of whatever now comes first.
+fn keep_header(doc: &mut DocumentMut, prefix: Option<&str>) {
+    let header = prefix
+        .and_then(|p| p.rfind("\n\n").map(|i| p[..i].trim_end()))
+        .filter(|h| !h.is_empty());
+    if let Some(header) = header {
+        prepend_to_first(doc, &format!("{header}\n\n"));
+    }
 }
 
 /// Puts `text` (comment lines ending in one blank line) in front of whatever `doc` now starts
@@ -350,7 +356,8 @@ pub fn add_group(path: &Path, window: &str, fields: &[(&str, Value)]) -> Result<
     save(path, &doc)
 }
 
-/// Remove the addressed tab, else group (with its tabs), else window (with everything in it).
+/// Remove the addressed tab, else group (with its tabs), else window (with everything in it). The
+/// file's header stays when the window removed is the file's first item, as with [`remove_key`].
 pub fn remove(path: &Path, at: At) -> Result<(), EditError> {
     let mut doc = load(path)?;
     match (at.group, at.tab) {
@@ -374,10 +381,14 @@ pub fn remove(path: &Path, at: At) -> Result<(), EditError> {
         }
         (None, None) => {
             let i = window_index(&doc, at.window)?;
+            let first = i == 0 && doc.iter().next().is_some_and(|(k, _)| k == "window");
             let ws = doc["window"].as_array_of_tables_mut().expect("checked");
-            ws.remove(i);
+            let gone = ws.remove(i);
             if ws.is_empty() {
                 doc.remove("window");
+            }
+            if first {
+                keep_header(&mut doc, gone.decor().prefix().and_then(|p| p.as_str()));
             }
         }
     }
@@ -1090,6 +1101,20 @@ mod tests {
         let ws = doc["window"].as_array_of_tables().unwrap();
         assert_eq!(ws.len(), 1);
         assert_eq!(ws.get(0).unwrap()["title"].as_str(), Some("Second"));
+    }
+
+    #[test]
+    fn remove_first_window_keeps_the_header() {
+        let (_d, p) = write_tmp(
+            "# header\n\n# about A\n[[window]]\ntitle = \"A\"\n\n[[window]]\ntitle = \"B\"\n",
+        );
+        remove(&p, at("A", None, None)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "# header\n\n[[window]]\ntitle = \"B\"\n"
+        );
+        remove(&p, at("B", None, None)).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "# header\n\n");
     }
 
     #[test]
