@@ -1142,6 +1142,31 @@ mod tests {
     }
 
     #[test]
+    fn remove_a_later_window_takes_its_own_comment_block() {
+        let (_d, p) =
+            write_tmp("[[window]]\ntitle = \"A\"\n\n# about B\n\n# B\n[[window]]\ntitle = \"B\"\n");
+        remove(&p, at("B", None, None)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "[[window]]\ntitle = \"A\"\n"
+        );
+    }
+
+    #[test]
+    fn set_path_removing_below_a_non_table_leaves_it() {
+        let body = "[[window]]\ntitle = \"W\"\n\n[[window.tab]]\ntitle = \"A\"\nsplit = true\n";
+        let (_d, p) = write_tmp(body);
+        set_path(
+            &p,
+            at("W", None, Some(("title", "A"))),
+            &["split", "size"],
+            None,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+    }
+
+    #[test]
     fn set_field_sets_and_unsets() {
         let (_d, p) = write_tmp(SAMPLE);
         let target = at("Comms", None, Some(("title", "B")));

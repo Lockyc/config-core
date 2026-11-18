@@ -278,6 +278,30 @@ mod tests {
     }
 
     #[test]
+    fn a_comment_block_stays_glued_to_its_header() {
+        // A two-line block above a container, a block above a tab (tight), one after a
+        // multi-line string, and a tab header opening the file.
+        let input = "[[w]]\nx=1\n# a\n# b\n[[w.g]]\ny=2\n# t\n[[w.g.tab]]\nz=3\n";
+        let expected = "[[w]]\n  x = 1\n\n  # a\n  # b\n  [[w.g]]\n    y = 2\n    # t\n    [[w.g.tab]]\n      z = 3\n";
+        assert_eq!(format_str(input), expected);
+        let after_string = "[[w]]\ncmd = \"\"\"\nx\n\"\"\"\n# about g\n[[w.g]]\ny = 2\n";
+        assert!(
+            format_str(after_string).contains("\n\n  # about g\n  [[w.g]]\n"),
+            "{}",
+            format_str(after_string)
+        );
+        assert_eq!(format_str("[[w.tab]]\nx=1\n"), "[[w.tab]]\n  x = 1\n");
+    }
+
+    #[test]
+    fn keeps_a_line_under_100_columns_whole() {
+        let items = vec!["\"abcdefgh\""; 7].join(", ");
+        let input = format!("args = [{items}]\n");
+        assert!(input.len() > 80 && input.len() < 100);
+        assert_eq!(format_str(&input), input);
+    }
+
+    #[test]
     fn is_idempotent() {
         let messy = "a=1\n[[w]]\nx=2\ntitle=\"t\"\n";
         let once = format_str(messy);
