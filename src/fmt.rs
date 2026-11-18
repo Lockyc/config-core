@@ -406,6 +406,158 @@ a
         assert_eq!(format_str(&out), out);
     }
 
+    mod prop {
+        use super::format_str;
+        use proptest::prelude::*;
+
+        /// Lines that look like TOML structure but sit inside a multi-line string.
+        const STRING_LINES: &[&str] = &[
+            "[ -d x ] && cd x",
+            "[[a.tab]]",
+            "[x]",
+            "# c",
+            "",
+            "  indented",
+            "echo done",
+        ];
+
+        /// A multi-line basic or literal string of [`STRING_LINES`], closed on its own line or on
+        /// the last content line.
+        fn multi_line() -> impl Strategy<Value = String> {
+            (
+                proptest::collection::vec(proptest::sample::select(STRING_LINES), 1..6),
+                prop_oneof![Just("\"\"\""), Just("'''")],
+                any::<bool>(),
+            )
+                .prop_map(|(ls, q, own_line)| {
+                    let sep = if own_line { "\n" } else { "" };
+                    format!("{q}\n{}{sep}{q}", ls.join("\n"))
+                })
+        }
+
+        /// A value: plain, a multi-line basic or literal string, an array of arrays wide enough
+        /// to expand one element per line, or an inline table.
+        fn value() -> impl Strategy<Value = String> {
+            prop_oneof![
+                Just("\"plain\"".to_string()),
+                Just("42".to_string()),
+                multi_line(),
+                (1..4usize).prop_map(|n| {
+                    let long = format!("\"{}\"", "x".repeat(40));
+                    let inner = vec![format!("[{long}, {long}]"); n].join(", ");
+                    format!("[{inner}]")
+                }),
+                Just("{ a = 1, b = \"[x]\" }".to_string()),
+            ]
+        }
+
+        /// Key-value lines `k0`, `k1`, … with an optional trailing comment, and comment lines
+        /// between them. Comment texts are numbered so they can be told apart.
+        fn entries() -> impl Strategy<Value = Vec<(Option<String>, bool, bool)>> {
+            proptest::collection::vec(
+                (proptest::option::of(value()), any::<bool>(), any::<bool>()),
+                0..4,
+            )
+        }
+
+        fn render(
+            out: &mut String,
+            header: &str,
+            entries: &[(Option<String>, bool, bool)],
+            n: &mut u32,
+        ) {
+            if !header.is_empty() {
+                out.push_str(header);
+                out.push('\n');
+            }
+            for (i, (v, above, trailing)) in entries.iter().enumerate() {
+                if *above {
+                    *n += 1;
+                    out.push_str(&format!("# note {n}\n"));
+                }
+                match v {
+                    Some(v) => {
+                        out.push_str(&format!("k{i} = {v}"));
+                        if *trailing {
+                            *n += 1;
+                            out.push_str(&format!(" # note {n}"));
+                        }
+                        out.push('\n');
+                    }
+                    None => out.push('\n'),
+                }
+            }
+        }
+
+        /// A config: root entries, then windows, each with entries, loose tabs and groups of
+        /// tabs, every table carrying generated entries and comments.
+        fn document() -> impl Strategy<Value = String> {
+            let tabs = || proptest::collection::vec(entries(), 0..3);
+            let window = (
+                entries(),
+                tabs(),
+                proptest::collection::vec((entries(), tabs()), 0..3),
+            );
+            (entries(), proptest::collection::vec(window, 0..3)).prop_map(|(root, windows)| {
+                let mut s = String::new();
+                let mut n = 0;
+                render(&mut s, "", &root, &mut n);
+                for (w, loose, groups) in &windows {
+                    render(&mut s, "[[window]]", w, &mut n);
+                    for t in loose {
+                        render(&mut s, "[[window.tab]]", t, &mut n);
+                    }
+                    for (g, tabs) in groups {
+                        render(&mut s, "[[window.group]]", g, &mut n);
+                        for t in tabs {
+                            render(&mut s, "[[window.group.tab]]", t, &mut n);
+                        }
+                    }
+                }
+                s
+            })
+        }
+
+        fn value_of(src: &str) -> toml::Table {
+            toml::from_str(src).unwrap_or_else(|e| panic!("unparseable:\n{src}\n{e}"))
+        }
+
+        /// The comment texts of `src`, sorted, read from taplo's syntax tree.
+        fn comments(src: &str) -> Vec<String> {
+            let mut out: Vec<String> = taplo::parser::parse(src)
+                .into_syntax()
+                .descendants_with_tokens()
+                .filter(|e| e.kind() == taplo::syntax::SyntaxKind::COMMENT)
+                .map(|e| e.to_string().trim().to_string())
+                .collect();
+            out.sort();
+            out
+        }
+
+        fn check(input: &str) {
+            let out = format_str(input);
+            assert_eq!(
+                value_of(&out),
+                value_of(input),
+                "value changed:\n{input}\n---\n{out}"
+            );
+            assert_eq!(format_str(&out), out, "not idempotent:\n{out}");
+            assert_eq!(comments(&out), comments(input), "comments changed:\n{out}");
+        }
+
+        proptest! {
+            #[test]
+            fn format_str_preserves_a_multi_line_string(s in multi_line(), next in "\\[\\[window(\\.group)?(\\.tab)?\\]\\]") {
+                check(&format!("[[window]]\ntitle = \"w\"\n[[window.tab]]\ncmd = {s}\n{next}\nk = 1\n"));
+            }
+
+            #[test]
+            fn format_str_preserves_value_comments_and_is_idempotent(doc in document()) {
+                check(&doc);
+            }
+        }
+    }
+
     #[test]
     fn format_file_rewrites_messy_then_is_a_noop() {
         let dir = tempfile::tempdir().unwrap();
