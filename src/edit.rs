@@ -306,11 +306,21 @@ pub fn add_window(path: &Path, title: &str, colour: Option<&str>) -> Result<(), 
     let mut fields = vec![("title", Value::from(title))];
     fields.extend(colour.map(|c| ("colour", Value::from(c))));
     let new = table_from(&fields);
+    // A comments-only file holds its comments in the document's trailer, which prints after
+    // every table: they are moved onto the new window as the file's header.
+    let header = doc
+        .is_empty()
+        .then(|| doc.trailing().as_str().unwrap_or("").trim_end().to_string())
+        .filter(|h| !h.is_empty());
     doc.entry("window")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
         .ok_or(EditError::Malformed("window"))?
         .push(new);
+    if let Some(header) = header {
+        doc.set_trailing("");
+        prepend_to_first(&mut doc, &format!("{header}\n\n"));
+    }
     save(path, &doc)
 }
 
@@ -999,6 +1009,19 @@ mod tests {
         add_window(&p2, "One", Some("#abc")).unwrap();
         assert_eq!(parse(&p2)["window"][0]["title"].as_str(), Some("One"));
         assert_eq!(parse(&p2)["window"][0]["colour"].as_str(), Some("#abc"));
+    }
+
+    #[test]
+    fn add_window_keeps_a_comments_only_header_on_top() {
+        for before in ["# header\n", "# header\n\n"] {
+            let (_d, p) = write_tmp(before);
+            add_window(&p, "One", None).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&p).unwrap(),
+                "# header\n\n[[window]]\ntitle = \"One\"\n",
+                "from {before:?}"
+            );
+        }
     }
 
     thread_local! {
