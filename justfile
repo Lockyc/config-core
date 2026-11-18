@@ -25,6 +25,18 @@ lint:
 fmt:
     cargo fmt
 
+# Mutation-test the editor and formatter (occasional; slow, one rebuild per mutant)
+[group("check")]
+mutants:
+    cargo mutants -o target -f src/edit.rs -f src/fmt.rs
+
+# Mutation-test only the lines changed since origin/main (after a change to the crate)
+[group("check")]
+mutants-diff:
+    mkdir -p target
+    git diff origin/main > target/mutants.diff
+    cargo mutants -o target --in-diff target/mutants.diff
+
 # Build the crate
 [group("build")]
 build:
