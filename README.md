@@ -1,7 +1,7 @@
 # config-core
 
 ![Platform](https://img.shields.io/badge/platform-macOS-555)
-![Rust](https://img.shields.io/badge/rust-CE412B?logo=rust&logoColor=white)
+![Rust](https://img.shields.io/badge/rust-1.99-CE412B?logo=rust&logoColor=white)
 [![License](https://img.shields.io/github/license/lockyc/config-core)](LICENSE)
 
 The TOML config layer four macOS apps share — [warden](https://github.com/lockyc/warden)
@@ -13,7 +13,8 @@ formatter behind `warden fmt`, `curator fmt` and `lector fmt`.
 
 It is not a generic config framework: each app keeps its own leaf tab type (curator:
 `url`/`session`; warden: `dir`/`shell`/`probe`; lector: `dir`; flotilla: `url`), validation, and
-the rules for how window and group settings pass down to each tab.
+the rules for how window and group settings pass down to each tab — apart from the
+login-session cascade, which is shared.
 
 ## Use
 
@@ -66,6 +67,8 @@ has none), so an unknown key is reported by name, inside the window, group and t
   (re-exported, so callers need no dependency of their own).
 - **`fmt`** — the house-style formatter (`format_str`, `format_file`) and `fmt_cli`, the `fmt`
   subcommand behind `warden fmt`, `curator fmt` and `lector fmt`.
+- **`session`** — the login-session cascade (tab → group → window → app → `DEFAULT_SESSION`)
+  curator and flotilla share.
 - **`roots`** — finding every git repo under a `[[window.root]]` directory (warden and lector).
 - **`paths`**, **`seed`**, **`colour`**, **`model`** — config-path resolution, a starter config
   written only when nothing is there, `#rgb` / `#rrggbb` colours, and the shared `Density`,
