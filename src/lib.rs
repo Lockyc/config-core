@@ -21,7 +21,9 @@
 //! - [`colour`] — `#rgb`/`#rrggbb` hex accent-colour parsing ([`Colour`], [`ColourError`]).
 //! - [`edit`] — leaf-agnostic structural add/remove/set/move edits of windows, groups and tabs
 //!   ([`add_window`], [`edit_window`], [`add_group`], [`add_tab`], [`remove`], [`set_field`],
-//!   [`move_tab`], the last three addressed by [`At`]) and of one root key ([`set_key`],
+//!   [`move_tab`], the last three addressed by [`At`]), of a nested key below one
+//!   ([`edit::set_path`], [`edit::set_paths`] by `At`; [`edit::set_root_tab_path`],
+//!   [`edit::set_root_tab_paths`] by [`edit::RootAt`]) and of one root key ([`set_key`],
 //!   [`remove_key`], [`toggle_tab_digit_keys`]), atomic and comment-preserving via `toml_edit`. The
 //!   caller supplies the fields; this module knows nothing about what they mean.
 //! - [`paths`] — where an app's config file lives. [`resolve_config_path`] checks the app's env

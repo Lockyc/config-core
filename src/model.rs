@@ -1,4 +1,4 @@
-//! Leaf-free config-model primitives shared by the curator, warden, and lector apps.
+//! Leaf-free config-model primitives shared by the curator, warden, lector and flotilla apps.
 //!
 //! These are the parts of the window → group → tab model that carry no knowledge of any app's
 //! leaf tab shape: the whole-app presentation enum [`Density`], the keybinding mode [`TabDigitKeys`],
