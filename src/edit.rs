@@ -473,7 +473,8 @@ fn target_mut<'d>(doc: &'d mut DocumentMut, at: At) -> Result<&'d mut Table, Edi
 /// removes the leaf and then every intermediate table left empty. Missing intermediates are
 /// written as standard tables (`[window.group.tab.split]`); an intermediate holding a non-table
 /// value (`split = true`) is replaced by a table. A comment attached to a removed key goes with
-/// that key; a comment on the table itself keeps the table.
+/// that key; a comment on the table itself keeps the table. A path that passes through an array
+/// of tables without an index leaves the document unchanged.
 ///
 /// A segment that parses as a number, directly after a key holding an array of tables (or an
 /// inline array of inline tables) and before at least one more segment, addresses that element:
@@ -626,6 +627,9 @@ fn set_nested(table: &mut Table, keys: &[&str], new: Option<Value>) {
             }
             return;
         }
+        // An array of tables reached without an element index: replacing it would drop every
+        // element. A no-op, like an out-of-range index.
+        Some(Item::ArrayOfTables(_)) => return,
         _ if new.is_none() => return,
         _ => {
             table.insert(first, Item::Table(Table::new()));
@@ -1295,6 +1299,16 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
         // Removal through an out-of-range index is equally a no-op.
         set_path(&p, a, &["split", "pane", "5", "size"], None).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
+    }
+
+    #[test]
+    fn set_path_through_an_array_of_tables_without_an_index_is_a_no_op() {
+        let (_d, p) = write_tmp(THREE_PANES);
+        let a = at("W", None, Some(("title", "A")));
+        set_path(&p, a, &["split", "pane", "size"], Some(0.25.into())).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
+        set_path(&p, a, &["split", "pane", "1"], Some(0.25.into())).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), THREE_PANES);
     }
 
