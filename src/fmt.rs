@@ -160,14 +160,23 @@ fn separate_sections(formatted: &str) -> String {
     format!("{}\n", out.join("\n").trim_end())
 }
 
+/// Refuse to format a non-TOML file: taplo error-recovers and would return it unchanged (or
+/// re-spaced), falsely reporting success. *Syntax* only (schema-agnostic, via toml_edit) — any
+/// well-formed TOML formats, so a file merely missing an app-specific field still does.
+fn check_syntax(src: &str) -> Result<(), toml_edit::TomlError> {
+    src.parse::<toml_edit::DocumentMut>().map(|_| ())
+}
+
 /// Format `path` in place. Reads, formats, and rewrites **only if the bytes change** (so a
 /// watcher driving this can't loop — an already-formatted file is a no-op). The rewrite is
 /// atomic (temp file + rename) and **identity-preserving**: it resolves symlinks so a linked
 /// config (e.g. one symlinked in from a dotfiles repo) is rewritten in place rather than
 /// replaced by a regular file, and it copies the original's permissions onto the replacement.
-/// Returns whether it wrote.
+/// Returns whether it wrote. A file that is not valid TOML is an `InvalidData` error and is left
+/// as it is, so a watcher never rewrites a config the user is part-way through fixing.
 pub fn format_file(path: &Path) -> std::io::Result<bool> {
     let original = std::fs::read_to_string(path)?;
+    check_syntax(&original).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let formatted = format_str(&original);
     if formatted == original {
         return Ok(false);
@@ -188,10 +197,7 @@ pub fn fmt_cli(check: bool, path: &Path) -> i32 {
             return 1;
         }
     };
-    // Refuse to "format" a non-TOML file: taplo error-recovers and would return it unchanged,
-    // falsely reporting success. Check *syntax* only (schema-agnostic, via toml_edit) — `fmt`
-    // tidies any well-formed TOML, so a file merely missing an app-specific field must still format.
-    if let Err(e) = src.parse::<toml_edit::DocumentMut>() {
+    if let Err(e) = check_syntax(&src) {
         eprintln!("error: {} is not valid TOML: {e}", path.display());
         return 1;
     }
@@ -597,6 +603,17 @@ a
 
         // Second pass: already formatted → no write, returns false.
         assert!(!format_file(&path).unwrap());
+    }
+
+    #[test]
+    fn format_file_leaves_a_broken_file_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let broken = "a = 1\n[[w]]\nx = \n[v]\n";
+        std::fs::write(&path, broken).unwrap();
+        let err = format_file(&path).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
     }
 
     #[cfg(unix)]
