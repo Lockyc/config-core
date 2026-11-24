@@ -1,16 +1,16 @@
 name = "config-core"
-summary = "The shared config primitives behind warden, curator, lector and flotilla — house-formats each app's TOML config, edits windows, groups and tabs while preserving your comments, provides the leaf-free model types, resolves the config path, parses accent colours, discovers project roots, and writes a starter config on request."
+summary = "The shared config layer behind warden, curator, lector and flotilla — the window → group → tab container and its validation, comment-preserving edits of windows, groups and tabs, the house TOML formatter, the login-session cascade, config-path resolution, accent colours, project-root discovery and an on-request starter config."
 status = "active"
 tags = ["config", "toml", "formatter", "shared-core"]
 
 [github]
 topics_extra = ["library"]
-description = "The shared config primitives behind warden, curator, lector and flotilla — house-formats each app's TOML config, edits windows, groups and tabs while preserving your comments, provides the leaf-free model types, resolves the config path, parses accent colours, discovers project roots, and writes a starter config on request."
+description = "The shared config layer behind warden, curator, lector and flotilla — the window → group → tab container and its validation, comment-preserving edits of windows, groups and tabs, the house TOML formatter, the login-session cascade, config-path resolution, accent colours, project-root discovery and an on-request starter config."
 topics = ["config", "formatter", "library", "rust", "taplo", "toml", "shared-core"]
 
 [[provides]]
 name = "config-shape"
-summary = "The shared window → group → tab config shape: a house-style TOML formatter (and the shared `fmt` CLI subcommand curator, warden and lector delegate to), #rgb/#rrggbb accent parsing, window validation, and comment-preserving structural edits of windows, groups, tabs and root keys. Not a generic config framework — each app keeps its own leaf model, validation, and cascade."
+summary = "The shared window → group → tab config shape: the Window/Group container, a house-style TOML formatter (and the shared `fmt` CLI subcommand curator, warden and lector delegate to), #rgb/#rrggbb accent parsing, window validation, comment-preserving structural edits of windows, groups, tabs and root keys, and the login-session cascade. Not a generic config framework — each app keeps its own leaf model and leaf validation."
 [[provides]]
 name = "config-path-seed"
 summary = "resolve_config_path()/default_config_path() — the identical $ENV-override-else-~/.config/<app>/config.toml resolution every app uses — and write_default_config(), an atomic, never-clobbering starter-config writer an app calls only on a user click (shell-core's home surface), never automatically."
