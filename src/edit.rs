@@ -165,7 +165,7 @@ pub fn remove_key(path: &Path, key: &str) -> Result<bool, EditError> {
 /// item just removed from the top of `doc` — put back in front of whatever now comes first.
 fn keep_header(doc: &mut DocumentMut, prefix: Option<&str>) {
     let header = prefix
-        .and_then(|p| p.rfind("\n\n").map(|i| p[..i].trim_end()))
+        .map(|p| p[..header_len(p)].trim_end())
         .filter(|h| !h.is_empty());
     if let Some(header) = header {
         prepend_to_first(doc, &format!("{header}\n\n"));
@@ -255,16 +255,23 @@ fn insert_first_key(src: &str, line: &str) -> String {
         }
         return format!("{}\n\n{line}", src.trim_end_matches('\n'));
     };
-    let head = &lines[..first_table];
-    let split = head
-        .iter()
-        .rposition(|l| l.trim().is_empty())
-        .map_or(0, |i| i + 1);
-    format!(
-        "{}{line}\n{}",
-        lines[..split].concat(),
-        lines[split..].concat()
-    )
+    let split = header_len(&lines[..first_table].concat());
+    format!("{}{line}\n{}", &src[..split], &src[split..])
+}
+
+/// The length of the file's header at the start of `text` (the comments before an item): up to and
+/// including its last whole blank line — empty or whitespace-only, so `\r\n` counts — else 0. The
+/// one rule every edit route uses for where the header ends and an item's own comment begins.
+fn header_len(text: &str) -> usize {
+    let mut end = 0;
+    let mut at = 0;
+    for l in text.split_inclusive('\n') {
+        at += l.len();
+        if l.ends_with('\n') && l.trim().is_empty() {
+            end = at;
+        }
+    }
+    end
 }
 
 /// Flips `tab_digit_keys` from what the file says (absent is `jump`) and returns the new mode.
@@ -868,6 +875,31 @@ mod tests {
             std::fs::read_to_string(&p).unwrap(),
             "# header\n\n[[window]]\ntitle = \"a\"\n"
         );
+    }
+
+    /// A blank line that holds spaces, or a CRLF one, sets the header off as `\n\n` does: every
+    /// edit route draws the header's edge with the same rule.
+    #[test]
+    fn remove_key_keeps_the_header_set_off_by_any_blank_line() {
+        for sep in ["\n  \n", "\r\n\r\n", "\n\t\n"] {
+            let src = format!("# header{sep}# own\ntitle = \"x\"\nk = 1\n");
+            let (_d, p) = write_tmp(&src);
+            assert!(remove_key(&p, "title").unwrap());
+            let out = std::fs::read_to_string(&p).unwrap();
+            assert!(
+                out.starts_with("# header") && !out.contains("# own"),
+                "{sep:?}: {out}"
+            );
+            let (_d, p) = write_tmp(&format!(
+                "# header{sep}# own\n[[window]]\ntitle = \"A\"\n\n[[window]]\ntitle = \"B\"\n"
+            ));
+            remove(&p, at("A", None, None)).unwrap();
+            let out = std::fs::read_to_string(&p).unwrap();
+            assert!(
+                out.starts_with("# header") && !out.contains("# own"),
+                "{sep:?}: {out}"
+            );
+        }
     }
 
     #[cfg(unix)]
