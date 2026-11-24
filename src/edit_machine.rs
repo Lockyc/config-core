@@ -370,17 +370,6 @@ impl ReferenceStateMachine for EditMachine {
         .boxed()
     }
 
-    /// `add_group` leaves group names to the caller (flotilla's `unique_group_name`), so a run
-    /// only adds a name its window does not hold yet.
-    fn preconditions(state: &Model, op: &Op) -> bool {
-        match op {
-            Op::AddGroup { window, name } => state
-                .win(window)
-                .is_none_or(|w| state.windows[w].groups.iter().all(|g| &g.name != name)),
-            _ => true,
-        }
-    }
-
     fn apply(mut s: Model, op: &Op) -> Model {
         let colour_ok = |c: &str| Colour::parse(c).is_ok();
         s.last = match op {
@@ -455,14 +444,14 @@ impl ReferenceStateMachine for EditMachine {
                 None => Outcome::Refused,
             },
             Op::AddGroup { window, name } => match s.win(window) {
-                Some(w) => {
+                Some(w) if s.windows[w].groups.iter().all(|g| &g.name != name) => {
                     s.windows[w].groups.push(MGroup {
                         name: name.clone(),
                         tabs: vec![],
                     });
                     Outcome::Saved { counted: true }
                 }
-                None => Outcome::Refused,
+                _ => Outcome::Refused,
             },
             Op::AddTab {
                 window,

@@ -29,6 +29,12 @@ pub enum EditError {
     WindowExists(String),
     #[error("a window title cannot be empty")]
     EmptyTitle,
+    #[error("the window already has a group named {0:?}")]
+    GroupExists(String),
+    #[error("a group name cannot be empty")]
+    EmptyGroupName,
+    #[error("a window's {0} cannot be zero")]
+    ZeroSize(&'static str),
     #[error("{0}")]
     BadColour(#[from] crate::ColourError),
     #[error("config has a `{0}` entry that is not an array of tables")]
@@ -294,18 +300,14 @@ pub fn add_tab(
 /// `EmptyTitle` for a blank title, `WindowExists` when the title is already taken, `BadColour`
 /// for a colour [`Colour::parse`](crate::Colour::parse) refuses.
 pub fn add_window(path: &Path, title: &str, colour: Option<&str>) -> Result<(), EditError> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Err(EditError::EmptyTitle);
-    }
-    colour.map(crate::Colour::parse).transpose()?;
     let mut doc = load(path)?;
-    if window_index(&doc, title).is_ok() {
-        return Err(EditError::WindowExists(title.to_string()));
-    }
     let mut fields = vec![("title", Value::from(title))];
     fields.extend(colour.map(|c| ("colour", Value::from(c))));
-    let new = table_from(&fields);
+    let new = checked_table(
+        siblings(doc.as_table(), "window"),
+        Slot::Window(None),
+        &fields,
+    )?;
     // A comments-only file holds its comments in the document's trailer, which prints after
     // every table: they are moved onto the new window as the file's header.
     let header = doc
@@ -342,7 +344,6 @@ pub fn edit_window(
     if colour.is_none() && new_title.is_none() {
         return Ok(());
     }
-    colour.flatten().map(crate::Colour::parse).transpose()?;
     let mut doc = load(path)?;
     if let Some(colour) = colour {
         apply_field(&mut doc, at, "colour", colour.map(Value::from))?;
@@ -353,15 +354,17 @@ pub fn edit_window(
     save(path, &doc)
 }
 
-/// Append a `[[window.group]]` populated with `fields` to the named window.
+/// Append a `[[window.group]]` populated with `fields` to the named window. Its `name` is written
+/// trimmed; a missing or blank one is `EmptyGroupName`, one the window already holds `GroupExists`.
 pub fn add_group(path: &Path, window: &str, fields: &[(&str, Value)]) -> Result<(), EditError> {
     let mut doc = load(path)?;
     let win = window_mut(&mut doc, window)?;
+    let new = checked_table(siblings(win, "group"), Slot::Group(None), fields)?;
     win.entry("group")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
         .ok_or(EditError::Malformed("group"))?
-        .push(table_from(fields));
+        .push(new);
     save(path, &doc)
 }
 
@@ -405,8 +408,9 @@ pub fn remove(path: &Path, at: At) -> Result<(), EditError> {
 }
 
 /// Set `key` on the addressed table (tab, else group, else window); `None` removes it. An existing
-/// value keeps its surrounding whitespace and inline comment. Setting a window's `title` renames it,
-/// refused with `EmptyTitle` or `WindowExists` as [`add_window`] refuses.
+/// value keeps its surrounding whitespace and inline comment. Setting a window's `title` or a
+/// group's `name` renames it, refused as [`add_window`] and [`add_group`] refuse; a window's
+/// `colour`, `width` and `height` are refused with `BadColour` and `ZeroSize`.
 pub fn set_field(path: &Path, at: At, key: &str, new: Option<Value>) -> Result<(), EditError> {
     let mut doc = load(path)?;
     apply_field(&mut doc, at, key, new)?;
@@ -420,23 +424,22 @@ fn apply_field(
     key: &str,
     new: Option<Value>,
 ) -> Result<(), EditError> {
-    // A window's title is its address: every rename path is checked here, so none writes a
-    // config validate_windows would refuse.
-    let new = if at.group.is_none() && at.tab.is_none() && key == "title" {
-        let title = new
-            .as_ref()
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or("");
-        if title.is_empty() {
-            return Err(EditError::EmptyTitle);
+    let new = match (at.group, at.tab) {
+        (_, Some(_)) => new,
+        (Some(g), None) => {
+            let win = window_mut(doc, at.window)?;
+            let own = group_index(win, g)?;
+            checked(siblings(win, "group"), Slot::Group(Some(own)), key, new)?
         }
-        if window_index(doc, title).is_ok_and(|i| window_index(doc, at.window).ok() != Some(i)) {
-            return Err(EditError::WindowExists(title.to_string()));
+        (None, None) => {
+            let own = window_index(doc, at.window)?;
+            checked(
+                siblings(doc.as_table(), "window"),
+                Slot::Window(Some(own)),
+                key,
+                new,
+            )?
         }
-        Some(Value::from(title))
-    } else {
-        new
     };
     let target = target_mut(doc, at)?;
     match new {
@@ -451,6 +454,99 @@ fn apply_field(
         }
     }
     Ok(())
+}
+
+/// A window or group a write lands on, with its index among its siblings when it already exists,
+/// so its own title or name does not count as taken.
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    Window(Option<usize>),
+    Group(Option<usize>),
+}
+
+impl Slot {
+    /// The key a window or group is addressed by.
+    fn address(self) -> &'static str {
+        match self {
+            Slot::Window(_) => "title",
+            Slot::Group(_) => "name",
+        }
+    }
+}
+
+/// The array of tables `key` holds under `table`, when it holds one.
+fn siblings<'d>(table: &'d Table, key: &str) -> Option<&'d ArrayOfTables> {
+    table.get(key).and_then(Item::as_array_of_tables)
+}
+
+/// `new` for `key` on `slot`, or the refusal `validate_windows` would turn into a load error: the
+/// one guard every window and group write passes through. A title or name comes back trimmed.
+fn checked(
+    siblings: Option<&ArrayOfTables>,
+    slot: Slot,
+    key: &str,
+    new: Option<Value>,
+) -> Result<Option<Value>, EditError> {
+    let own = match slot {
+        Slot::Window(own) => {
+            if let Some(c) = new
+                .as_ref()
+                .filter(|_| key == "colour")
+                .and_then(Value::as_str)
+            {
+                crate::Colour::parse(c)?;
+            }
+            for side in ["width", "height"] {
+                if key == side && new.as_ref().and_then(Value::as_integer) == Some(0) {
+                    return Err(EditError::ZeroSize(side));
+                }
+            }
+            own
+        }
+        Slot::Group(own) => own,
+    };
+    let address = slot.address();
+    if key != address {
+        return Ok(new);
+    }
+    let name = new
+        .as_ref()
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if name.is_empty() {
+        return Err(match slot {
+            Slot::Window(_) => EditError::EmptyTitle,
+            Slot::Group(_) => EditError::EmptyGroupName,
+        });
+    }
+    let taken = siblings.and_then(|s| s.iter().position(|t| matches_trimmed(t, address, name)));
+    if taken.is_some() && taken != own {
+        return Err(match slot {
+            Slot::Window(_) => EditError::WindowExists(name.to_string()),
+            Slot::Group(_) => EditError::GroupExists(name.to_string()),
+        });
+    }
+    Ok(Some(Value::from(name)))
+}
+
+/// A new window or group table holding `fields`, each passed through [`checked`]; a missing title
+/// or name is refused as a blank one.
+fn checked_table(
+    siblings: Option<&ArrayOfTables>,
+    slot: Slot,
+    fields: &[(&str, Value)],
+) -> Result<Table, EditError> {
+    if !fields.iter().any(|(k, _)| *k == slot.address()) {
+        checked(siblings, slot, slot.address(), None)?;
+    }
+    let mut t = Table::new();
+    for (k, v) in fields {
+        if let Some(v) = checked(siblings, slot, k, Some(v.clone()))? {
+            t.insert(k, value(v));
+        }
+    }
+    Ok(t)
 }
 
 /// The table `at` addresses: the tab, else the group, else the window.
@@ -1100,6 +1196,69 @@ mod tests {
         assert_eq!(doc["window"][1]["group"][0]["name"].as_str(), Some("G"));
         let err = add_group(&p, "Nope", &[("name", "G".into())]).unwrap_err();
         assert!(matches!(err, EditError::WindowNotFound(_)));
+    }
+
+    /// Every write that touches a key `validate_windows` checks is refused when the result would
+    /// fail it, so the app never saves a config it then refuses to load.
+    #[test]
+    fn edits_refuse_what_validate_windows_rejects() {
+        let (_d, p) = write_tmp(SAMPLE);
+        let before = std::fs::read_to_string(&p).unwrap();
+        let win = at("Comms", None, None);
+        let chat = at("Comms", Some("Chat"), None);
+        assert!(matches!(
+            add_group(&p, "Comms", &[("name", " Chat ".into())]),
+            Err(EditError::GroupExists(g)) if g == "Chat"
+        ));
+        assert!(matches!(
+            add_group(&p, "Comms", &[("name", "  ".into())]),
+            Err(EditError::EmptyGroupName)
+        ));
+        assert!(matches!(
+            add_group(&p, "Comms", &[]),
+            Err(EditError::EmptyGroupName)
+        ));
+        assert!(matches!(
+            set_field(&p, chat, "name", Some("Other".into())),
+            Err(EditError::GroupExists(_))
+        ));
+        assert!(matches!(
+            set_field(&p, chat, "name", Some(" ".into())),
+            Err(EditError::EmptyGroupName)
+        ));
+        assert!(matches!(
+            set_field(&p, chat, "name", None),
+            Err(EditError::EmptyGroupName)
+        ));
+        assert!(matches!(
+            set_field(&p, win, "colour", Some("red".into())),
+            Err(EditError::BadColour(_))
+        ));
+        assert!(matches!(
+            set_field(&p, win, "width", Some(0.into())),
+            Err(EditError::ZeroSize("width"))
+        ));
+        assert!(matches!(
+            set_field(&p, win, "height", Some(0.into())),
+            Err(EditError::ZeroSize("height"))
+        ));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), before);
+        // A group's own name, differently spaced, is not taken; a fresh name lands trimmed.
+        set_field(&p, chat, "name", Some(" Chat ".into())).unwrap();
+        add_group(&p, "Second", &[("name", " Chat ".into())]).unwrap();
+        assert_eq!(
+            parse(&p)["window"][1]["group"][0]["name"].as_str(),
+            Some("Chat")
+        );
+        set_field(&p, win, "width", Some(800.into())).unwrap();
+        // A tab's keys are the app's: a tab `name` or `colour` is not checked here.
+        set_field(
+            &p,
+            at("Comms", None, Some(("title", "A"))),
+            "colour",
+            Some("red".into()),
+        )
+        .unwrap();
     }
 
     #[test]
